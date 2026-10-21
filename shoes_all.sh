@@ -48,6 +48,9 @@ TROJAN_PORT="${TROJAN_PORT:-8444}"
 REALITY_PORT="${REALITY_PORT:-8899}"
 REALITY_DEST="${REALITY_DEST:-www.microsoft.com:443}"   # Reality 握手目标(需为支持 TLS1.3+H2 的真实站点)
 
+# 远端脚本地址: 用于 curl | bash 场景自装本地命令; jsdelivr 无 raw 的 CDN 缓存
+SHOES_RAW_URL="${SHOES_RAW_URL:-https://cdn.jsdelivr.net/gh/ppopcn/shoes_all@main/shoes_all.sh}"
+
 # ---- 平台探测 ----
 OS_FAMILY=""; INIT_SYS=""; SERVICE_FILE=""
 detect_platform() {
@@ -600,7 +603,19 @@ validate_plan() {
 }
 
 install_self() {
-  cp -f "$0" /usr/local/bin/shoes-all 2>/dev/null && chmod +x /usr/local/bin/shoes-all || true
+  local dest=/usr/local/bin/shoes-all src="$0" base
+  base="$(basename "$src" 2>/dev/null || echo bash)"
+  # 本地文件运行: 直接拷自己; curl | bash 时 $0 是 bash, 需要回源下载一份
+  if [ -f "$src" ] && [ "$base" != "bash" ] && [ "$base" != "-bash" ] && [ "$base" != "sh" ]; then
+    cp -f "$src" "$dest" 2>/dev/null && chmod +x "$dest" && { ok "本地命令: $dest"; return 0; }
+  fi
+  info "安装本地命令 ${dest} ..."
+  if curl -fsSL --retry 2 --max-time 30 -o "${dest}.tmp" "$SHOES_RAW_URL" 2>/dev/null \
+     && bash -n "${dest}.tmp" 2>/dev/null; then
+    mv -f "${dest}.tmp" "$dest" && chmod +x "$dest" && { ok "本地命令: $dest"; return 0; }
+  fi
+  rm -f "${dest}.tmp" 2>/dev/null || true
+  warn "未能安装本地命令, 可这样管理: curl -fsSL ${SHOES_RAW_URL} | sudo bash -s -- info"
 }
 
 # ---- 子命令 ----

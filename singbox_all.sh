@@ -174,7 +174,7 @@ PORT_EXTRA_BLOCKLIST="${PORT_EXTRA_BLOCKLIST:-}"
 # 依赖是否已就绪(all-in-one 多协议循环只装一次)
 DEPS_READY=0
 
-RAW_URL="https://raw.githubusercontent.com/ppopcn/singbox_mt/refs/heads/main/${RAW_FILE}"
+RAW_URL="https://cdn.jsdelivr.net/gh/ppopcn/shoes_all@main/${RAW_FILE}"
 
 DEFAULT_DOMAINS=(
   "www.cloudflare.com"
