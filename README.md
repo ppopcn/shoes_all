@@ -2,10 +2,10 @@
 
 两台「单进程 · 单配置 · 全协议」代理服务端一键部署脚本，都是**一个脚本装完、跑一个进程、出一张凭据表**。
 
-| 脚本 | 内核 | 协议数 | 适用 |
-|---|---|---|---|
-| [`shoes_all.sh`](shoes_all.sh) | [cfal/shoes](https://github.com/cfal/shoes)（Rust，静态 musl 二进制） | 7 | 轻量，无依赖，跑起来就是一个小二进制 |
-| [`singbox_all.sh`](singbox_all.sh) | [shtorm-7/sing-box-extended](https://github.com/shtorm-7/sing-box-extended) | 8 | 需要 MTPROXY / 更多扩展能力时用 |
+| 脚本                                 | 内核                                                                          | 协议数 | 适用                    |
+| ---------------------------------- | --------------------------------------------------------------------------- | --- | --------------------- |
+| [`shoes_all.sh`](shoes_all.sh)     | [cfal/shoes](https://github.com/cfal/shoes)（Rust，静态 musl 二进制）               | 7   | 轻量，无依赖，跑起来就是一个小二进制    |
+| [`singbox_all.sh`](singbox_all.sh) | [shtorm-7/sing-box-extended](https://github.com/shtorm-7/sing-box-extended) | 8   | 需要 MTPROXY / 更多扩展能力时用 |
 
 ---
 
@@ -18,6 +18,7 @@ curl -fsSL https://cdn.jsdelivr.net/gh/ppopcn/shoes_all@main/shoes_all.sh | sudo
 ```
 
 <details>
+
 <summary>raw.githubusercontent 地址（有 CDN 缓存，可能拉到旧版）</summary>
 
 ```bash
@@ -65,19 +66,84 @@ curl -fsSL https://cdn.jsdelivr.net/gh/ppopcn/shoes_all@main/singbox_all.sh \
 
 ---
 
+## 环境变量参数
+
+两个脚本都用**环境变量**传参（前缀形式），注意不是位置参数——`sh xxx.sh PROTOCOLS=vless` 会把 `PROTOCOLS=vless` 当子命令报错：
+
+```bash
+sudo PROTOCOLS=vless bash shoes_all.sh              # 本地文件
+curl -fsSL .../shoes_all.sh | sudo PROTOCOLS=hy2 bash   # curl | bash
+sudo env PROTOCOLS=vless bash shoes_all.sh          # 已 sudo 时
+```
+
+### PROTOCOLS 可选值
+
+| 协议 | shoes_all.sh | singbox_all.sh |
+| ---- | ------------ | -------------- |
+| MTPROXY | ❌ 不支持 | `mt` |
+| Hysteria2 | `hy2` | `hy2` |
+| TUIC v5 | `tuic` | `tuic` |
+| Shadowsocks | `ss` ⚠️ | `ssr` ⚠️ 名字不同 |
+| VLESS | `vless`（独立） | `vless`（捆绑 VMess 一起装） |
+| VMess | `vmess`（独立） | （随 `vless` 装入） |
+| Trojan | `trojan` | `trojan` |
+| Reality | `reality` | `reality` |
+
+- 不传 `PROTOCOLS` 时默认全部安装：shoes 为 `hy2,tuic,ss,vless,vmess,trojan,reality`；sing-box 为 `mt,hy2,tuic,ssr,vless,trojan,reality`
+- 传其他值会直接报错；逗号分隔、可任意组合
+- sing-box 选 `vless` 会同时装 VLESS(8989) 和 VMess(8990) 两个入站
+
+### 通用参数（两边风格一致）
+
+| 变量 | 默认 | 说明 |
+| ---- | ---- | ---- |
+| `HY2_PORT` / `TUIC_PORT` / `SS_PORT` | 443 / 8443 / 8388 | 各协议端口 |
+| `VLESS_PORT` / `VMESS_PORT` / `TROJAN_PORT` / `REALITY_PORT` | 8989 / 8990 / 8444 / 8899 | 各协议端口 |
+| `REALITY_DEST` | `www.microsoft.com:443` | Reality 握手目标（需支持 TLS1.3+H2） |
+| `DOMAIN` | 随机伪装域名 | SNI / 自签证书域名 |
+| `MIRROR` | （空） | GitHub 下载镜像前缀，如 `https://ghfast.top/` |
+| `SERVER_ADDR` | 自动探测 | 手动指定对外 IP（生成链接用） |
+| `LOG_LEVEL` | `info` | 日志级别，排错可设 `debug` |
+| `CERT_FILE` / `KEY_FILE` | （自动生成） | 使用已有证书 |
+| `HY2_PASSWORD` / `TUIC_UUID` / `VLESS_UUID` 等凭据 | 随机生成 | 已有配置会自动复用，无需每次传 |
+
+### 脚本专属参数
+
+| 变量 | 适用 | 说明 |
+| ---- | ---- | ---- |
+| `SHOES_TAG` | shoes | 锁定内核版本，如 `v0.3.3` |
+| `SINGBOX_TAG` | sing-box | 锁定内核版本 |
+| `FORCE_BIN=1` | sing-box | 强制重新下载二进制 |
+| `<NAME>_V` | shoes | 显式覆盖凭据，如 `HY2_PASSWORD_V=xxx`（重装想固定密码时用） |
+
+### 组合示例
+
+```bash
+# 只装 Reality，指定镜像
+sudo PROTOCOLS=reality MIRROR=https://ghfast.top/ bash singbox_all.sh
+
+# 只装 hy2，固定密码与端口
+sudo PROTOCOLS=hy2 HY2_PORT=443 HY2_PASSWORD_V=mypass123 bash shoes_all.sh
+
+# 只装 VLESS+VMess，指定域名
+sudo PROTOCOLS=vless,vmess DOMAIN=foo.example.com bash shoes_all.sh
+```
+
+---
+
 ## 默认端口
 
 **shoes_all.sh**
 
-| 协议 | 端口 | 传输 | 说明 |
-|---|---|---|---|
-| Hysteria2 | 443/udp | QUIC | 抗封锁首选 |
-| TUIC v5 | 8443/udp | QUIC | 需 `alpn=h3` |
-| Shadowsocks | 8388/tcp | TCP | aes-256-gcm |
-| VLESS | 8989/tcp | TCP + TLS | 自签证书 |
-| VMess | 8990/tcp | TCP + TLS | 加密方式须 `aes-128-gcm` |
-| Trojan | 8444/tcp | TCP + TLS | |
-| Reality | 8899/tcp | TCP | VLESS + XTLS Vision，无需证书 |
+| 协议          | 端口       | 传输        | 说明                       |
+| ----------- | -------- | --------- | ------------------------ |
+| Hysteria2   | 443/udp  | QUIC      | 抗封锁首选                    |
+| TUIC v5     | 8443/udp | QUIC      | 需 `alpn=h3`              |
+| Shadowsocks | 8388/tcp | TCP       | aes-256-gcm              |
+| VLESS       | 8989/tcp | TCP + TLS | 自签证书                     |
+| VMess       | 8990/tcp | TCP + TLS | 加密方式须 `aes-128-gcm`      |
+| Trojan      | 8444/tcp | TCP + TLS |                          |
+| Reality     | 8899/tcp | TCP       | VLESS + XTLS Vision，无需证书 |
 
 **singbox_all.sh**：另有 MTPROXY 443/tcp（与 HY2 的 443/udp 共存），VLESS/VMess 走 TLS + WS，端口同上表。
 
@@ -109,12 +175,12 @@ singbox-all info/status/logs/uninstall   # 同上的 sing-box 版本
 
 **不会冲突，是就地覆盖**：同一个服务先停再起，不会跑出第二个进程。
 
-| 内容 | 行为 |
-|---|---|
-| 凭据（密码 / UUID / Reality 密钥） | 从旧配置读出来复用，客户端不失效 |
-| TLS 证书 | 已存在直接复用 |
-| 配置文件 | 覆盖重渲染；旧文件备份为 `.bak.<时间戳>`，只留最近 3 份 |
-| 防火墙规则 | 幂等添加，不会重复堆积 |
+| 内容                         | 行为                                 |
+| -------------------------- | ---------------------------------- |
+| 凭据（密码 / UUID / Reality 密钥） | 从旧配置读出来复用，客户端不失效                   |
+| TLS 证书                     | 已存在直接复用                            |
+| 配置文件                       | 覆盖重渲染；旧文件备份为 `.bak.<时间戳>`，只留最近 3 份 |
+| 防火墙规则                      | 幂等添加，不会重复堆积                        |
 
 注意：端口、`DOMAIN`、`REALITY_DEST` 这类参数会在重装时按当前环境变量/默认值重新计算，改过端口的话重装要带上同样的变量。
 
@@ -122,11 +188,11 @@ singbox-all info/status/logs/uninstall   # 同上的 sing-box 版本
 
 ## 支持的平台
 
-| 发行版 | init | 包管理 | 防火墙 |
-|---|---|---|---|
-| Debian / Ubuntu | systemd | apt | ufw → iptables |
+| 发行版                          | init    | 包管理       | 防火墙                  |
+| ---------------------------- | ------- | --------- | -------------------- |
+| Debian / Ubuntu              | systemd | apt       | ufw → iptables       |
 | CentOS / RHEL / Rocky / Alma | systemd | dnf 或 yum | firewalld → iptables |
-| Alpine | OpenRC | apk | iptables（规则自动持久化） |
+| Alpine                       | OpenRC  | apk       | iptables（规则自动持久化）    |
 
 - 架构：x86_64 / aarch64（shoes 用官方 musl 静态包，glibc 发行版同样可用；无 32 位 ARM 包）
 - RHEL 系若 SELinux 为 Enforcing，脚本会提示；服务起不来时先看 `/var/log/audit/audit.log`
@@ -136,14 +202,14 @@ singbox-all info/status/logs/uninstall   # 同上的 sing-box 版本
 
 ## 踩过的坑（客户端连不上先看这里）
 
-| 现象 | 原因 | 处理 |
-|---|---|---|
+| 现象                                                      | 原因                                             | 处理                                             |
+| ------------------------------------------------------- | ---------------------------------------------- | ---------------------------------------------- |
 | VMess 报 `Standard format data stream was not requested` | 客户端 VMess 加密方式选了 `auto / none / zero`，会关闭标准数据流 | 改成 `aes-128-gcm`（脚本生成的链接已固定 `scy=aes-128-gcm`） |
-| TUIC 握手失败 | 客户端没带 `alpn=h3`，或服务端开了 0-RTT | 链接已带 `alpn=h3`，服务端 `zero_rtt_handshake=false` |
-| Reality 报 `VLESS addons not supported ... VISION` | 客户端带 `flow=xtls-rprx-vision` 但服务端未开 vision | 服务端 `vision: true`，脚本已默认开启 |
-| 日志里 `invalid client protocol version ... got 71` | 客户端延迟探测往端口打了明文 `GET`（71 是字母 G） | 忽略，不是故障 |
-| `shoes-all logs` 没输出（Alpine） | 旧版 OpenRC 用 start-stop-daemon，忽略 output_log | 已改用 `supervise-daemon`，更新脚本后正常 |
-| 拉到的脚本是旧版 | raw 的 Fastly 缓存 300 秒 | 换 jsdelivr，或按 commit sha 拉 |
+| TUIC 握手失败                                               | 客户端没带 `alpn=h3`，或服务端开了 0-RTT                   | 链接已带 `alpn=h3`，服务端 `zero_rtt_handshake=false`  |
+| Reality 报 `VLESS addons not supported ... VISION`       | 客户端带 `flow=xtls-rprx-vision` 但服务端未开 vision     | 服务端 `vision: true`，脚本已默认开启                     |
+| 日志里 `invalid client protocol version ... got 71`        | 客户端延迟探测往端口打了明文 `GET`（71 是字母 G）                 | 忽略，不是故障                                        |
+| `shoes-all logs` 没输出（Alpine）                            | 旧版 OpenRC 用 start-stop-daemon，忽略 output_log    | 已改用 `supervise-daemon`，更新脚本后正常                 |
+| 拉到的脚本是旧版                                                | raw 的 Fastly 缓存 300 秒                          | 换 jsdelivr，或按 commit sha 拉                     |
 
 ---
 
