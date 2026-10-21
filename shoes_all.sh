@@ -551,7 +551,7 @@ print_summary() {
   if enabled vmess; then
     _sec_head "[5]" "VMess" "${VMESS_PORT}/tcp"
     printf '  UUID : %s\n' "$VMESS_UUID"
-    _link_line "vmess://$(b64 "{\"v\":\"2\",\"ps\":\"shoes-vmess\",\"add\":\"${ip}\",\"port\":\"${VMESS_PORT}\",\"id\":\"${VMESS_UUID}\",\"aid\":\"0\",\"net\":\"tcp\",\"type\":\"none\",\"host\":\"${sni}\",\"path\":\"\",\"tls\":\"tls\",\"sni\":\"${sni}\"}")"
+    _link_line "vmess://$(b64 "{\"v\":\"2\",\"ps\":\"shoes-vmess\",\"add\":\"${ip}\",\"port\":\"${VMESS_PORT}\",\"id\":\"${VMESS_UUID}\",\"aid\":\"0\",\"scy\":\"aes-128-gcm\",\"net\":\"tcp\",\"type\":\"none\",\"host\":\"${sni}\",\"path\":\"\",\"tls\":\"tls\",\"sni\":\"${sni}\"}")"
   fi
   if enabled trojan; then
     _sec_head "[6]" "Trojan" "${TROJAN_PORT}/tcp"
@@ -572,6 +572,8 @@ print_summary() {
   printf '  · TLS 类协议记得开 "允许不安全证书 / allowInsecure"\n'
   printf '  · Reality 无需证书, 客户端填 SNI 与公钥即可; 删掉 short_id 也能连\n'
   printf '  · Shadowsocks 客户端请选 "Shadowsocks", 不是 "ShadowsocksR"\n'
+  printf '  · VMess 加密方式必须是 aes-128-gcm 或 chacha20-poly1305\n'
+  printf '    (auto / none / zero 会关闭标准数据流, 服务端直接拒连)\n'
   print_manage_block
 }
 
