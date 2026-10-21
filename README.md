@@ -14,32 +14,17 @@
 ### shoes 全家桶（7 协议）
 
 ```bash
-curl -fsSL https://cdn.jsdelivr.net/gh/ppopcn/shoes_all@main/shoes_all.sh | sudo bash
-```
-
-<details>
-
-<summary>raw.githubusercontent 地址（有 CDN 缓存，可能拉到旧版）</summary>
-
-```bash
 curl -fsSL https://raw.githubusercontent.com/ppopcn/shoes_all/refs/heads/main/shoes_all.sh | sudo bash
 ```
 
-</details>
 
 ### sing-box 全家桶（8 协议 且支持MTPROXY）
-
-```bash
-curl -fsSL https://cdn.jsdelivr.net/gh/ppopcn/shoes_all@main/singbox_all.sh | sudo bash
-```
-<details>
-<summary>raw.githubusercontent 地址（有 CDN 缓存，可能拉到旧版）</summary>
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ppopcn/shoes_all/refs/heads/main/singbox_all.sh | sudo bash
 ```
 
-</details>
+
 ### 装之前先自检（可选）
 
 ```bash
