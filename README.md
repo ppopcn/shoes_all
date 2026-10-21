@@ -86,15 +86,15 @@ sudo env PROTOCOLS=vless bash shoes_all.sh          # 已 sudo 时
 | MTPROXY | ❌ 不支持 | `mt` | ❌ 不支持 |
 | Hysteria2 | `hy2` | `hy2` | ❌ 不支持 |
 | TUIC v5 | `tuic` | `tuic` | ❌ 不支持 |
-| Shadowsocks | `ss` ⚠️ | `ssr` ⚠️ 名字不同 | `ss` |
+| Shadowsocks | `ss` | `ss` | `ss` |
 | VLESS | `vless`（独立） | `vless`（捆绑 VMess 一起装） | `vless`（TLS+WS） |
 | VMess | `vmess`（独立） | （随 `vless` 装入） | `vmess`（TLS+WS） |
 | Trojan | `trojan` | `trojan` | `trojan` |
 | Reality | `reality` | `reality` | `reality`（含 Vision） |
 
-- 不传 `PROTOCOLS` 时默认全部安装：shoes 为 `hy2,tuic,ss,vless,vmess,trojan,reality`；sing-box 为 `mt,hy2,tuic,ssr,vless,trojan,reality`；xray 为 `reality,vless,vmess,trojan,ss`
+- 不传 `PROTOCOLS` 时默认全部安装：shoes 为 `hy2,tuic,ss,vless,vmess,trojan,reality`；sing-box 为 `mt,hy2,tuic,ss,vless,trojan,reality`；xray 为 `reality,vless,vmess,trojan,ss`
 - 传其他值会直接报错；逗号分隔、可任意组合
-- sing-box 选 `vless` 会同时装 VLESS(8989) 和 VMess(8990) 两个入站
+- sing-box 选 `vless` 会同时装 VLESS(8989) 和 VMess(8990) 两个入站；sing-box 也兼容旧写法 `ssr`
 
 ### 通用参数（两边风格一致）
 

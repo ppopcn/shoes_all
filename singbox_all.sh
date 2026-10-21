@@ -25,7 +25,7 @@
 #
 # 用法:
 #   sudo bash singbox_all.sh                    # 全部安装
-#   sudo PROTOCOLS=mt,hy2 bash singbox_all.sh   # 只启用指定协议(mt hy2 tuic ssr vless trojan reality)
+#   sudo PROTOCOLS=mt,hy2 bash singbox_all.sh   # 只启用指定协议(mt hy2 tuic ss vless trojan reality)
 #   sudo bash singbox_all.sh plan               # 只打印/校验端口计划, 不安装
 #   sudo bash singbox_all.sh status             # 查看服务状态与端口
 #   sudo bash singbox_all.sh info               # 重新打印全部凭据与链接
@@ -54,7 +54,7 @@ CONFIG_FILE="/etc/sing-box/all.json"
 NEED_CERT=1
 NEED_DOMAIN=1
 
-PROTO_LIST="${PROTOCOLS:-mt,hy2,tuic,ssr,vless,trojan,reality}"
+PROTO_LIST="${PROTOCOLS:-mt,hy2,tuic,ss,vless,trojan,reality}"
 PROTO_LIST="${PROTO_LIST//,/ }"
 
 # 端口计划: 先记录用户是否显式指定(重装时未指定的端口要沿用已有配置)
@@ -1459,9 +1459,10 @@ normalize_protocols() {
   local out="" p
   for p in $PROTO_LIST; do
     [[ -n "$p" ]] || continue
+    if [ "$p" = "ss" ]; then p=ssr; fi   # 对外统一用 ss(兼容旧写法 ssr), 内部标识符仍为 ssr
     case "$p" in
       mt|hy2|tuic|ssr|vless|trojan|reality) out+="${p}"$'\n' ;;
-      *) die "未知协议: ${p} (可用: mt hy2 tuic ssr vless trojan reality, 用 PROTOCOLS=mt,hy2,... 选择)" ;;
+      *) die "未知协议: ${p} (可用: mt hy2 tuic ss vless trojan reality, 用 PROTOCOLS=mt,hy2,... 选择)" ;;
     esac
   done
   [[ -n "$out" ]] || die "PROTOCOLS 解析结果为空"
@@ -2467,7 +2468,7 @@ singbox_all.sh - 一键部署 sing-box 全协议服务端 (单进程 + 单合并
 
 用法:
   sudo bash singbox_all.sh                    # 全部安装
-  sudo PROTOCOLS=mt,hy2 bash singbox_all.sh   # 只启用指定协议(mt hy2 tuic ssr vless trojan reality)
+  sudo PROTOCOLS=mt,hy2 bash singbox_all.sh   # 只启用指定协议(mt hy2 tuic ss vless trojan reality)
   sudo bash singbox_all.sh plan               # 只打印/校验端口计划, 不安装
   sudo bash singbox_all.sh status             # 查看服务状态与端口
   sudo bash singbox_all.sh info               # 重新打印全部凭据与链接
