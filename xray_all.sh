@@ -46,7 +46,9 @@ VLESS_PORT="${VLESS_PORT:-8989}"
 VMESS_PORT="${VMESS_PORT:-8990}"
 TROJAN_PORT="${TROJAN_PORT:-8444}"
 SS_PORT="${SS_PORT:-8388}"
-REALITY_DEST="${REALITY_DEST:-www.microsoft.com:443}"   # Reality 握手目标(需为支持 TLS1.3+H2 的真实站点)
+# 注意: 不要用 www.microsoft.com 做 dest —— 其证书记录 8273 字节超过 REALITY
+#       解析器硬编码的 8192 上限, 握手必然失败 (Xray-core #6356)
+REALITY_DEST="${REALITY_DEST:-www.cloudflare.com:443}"   # Reality 握手目标(需为支持 TLS1.3+H2 的真实站点)
 
 # 远端脚本地址: 用于 curl | bash 场景自装本地命令
 XRAY_RAW_URL="${XRAY_RAW_URL:-https://cdn.jsdelivr.net/gh/ppopcn/shoes_all@main/xray_all.sh}"
@@ -604,6 +606,7 @@ print_summary() {
   printf '\n  %s▍客户端提示%s\n' "$C_BLD$C_YEL" "$C_RST"
   printf '  · TLS 类协议记得开 "允许不安全证书 / allowInsecure"\n'
   printf '  · Reality 无需证书, 客户端填 SNI 与公钥即可; 删掉 short_id 也能连\n'
+  printf '  · REALITY_DEST 别用 www.microsoft.com: 其证书记录超 8192 字节上限, 握手必失败\n'
   printf '  · VLESS/VMess 走 WebSocket, 客户端传输层选 ws, 路径分别为 /vless 和 /vmess\n'
   printf '  · VMess 加密方式选 auto 即可(内核自动协商 aes-128-gcm/chacha20)\n'
   print_manage_block
