@@ -234,7 +234,7 @@ EOF
       type: tuic
       uuid: ${TUIC_UUID}
       password: ${TUIC_PASSWORD}
-      zero_rtt_handshake: true
+      zero_rtt_handshake: false
 EOF
   fi
   if enabled ss; then
@@ -274,7 +274,7 @@ EOF
           key: ${key}
           protocol:
             type: vmess
-            cipher: chacha20-poly1305
+            cipher: any
             user_id: ${VMESS_UUID}
             udp_enabled: true
     rules: allow-all-direct
@@ -305,6 +305,7 @@ EOF
           private_key: "${REALITY_PRIVATE_KEY}"
           short_ids: ["${REALITY_SHORT_ID}", ""]
           dest: "${REALITY_DEST}"
+          vision: true
           protocol:
             type: vless
             user_id: ${REALITY_UUID}
@@ -534,7 +535,7 @@ print_summary() {
     _sec_head "[2]" "TUIC v5" "${TUIC_PORT}/udp"
     printf '  UUID : %s\n' "$TUIC_UUID"
     printf '  密码 : %s\n' "$TUIC_PASSWORD"
-    _link_line "tuic://${TUIC_UUID}:${TUIC_PASSWORD}@${ip}:${TUIC_PORT}?sni=${sni}&allow_insecure=1&congestion_control=bbr&udp_relay_mode=native#shoes-tuic"
+    _link_line "tuic://${TUIC_UUID}:${TUIC_PASSWORD}@${ip}:${TUIC_PORT}?sni=${sni}&alpn=h3&allow_insecure=1&congestion_control=bbr&udp_relay_mode=native#shoes-tuic"
   fi
   if enabled ss; then
     _sec_head "[3]" "Shadowsocks" "${SS_PORT}/tcp"
