@@ -50,8 +50,8 @@ SS_PORT="${SS_PORT:-8388}"
 #       解析器硬编码的 8192 上限, 握手必然失败 (Xray-core #6356)
 REALITY_DEST="${REALITY_DEST:-www.cloudflare.com:443}"   # Reality 握手目标(需为支持 TLS1.3+H2 的真实站点)
 
-# 远端脚本地址: 用于 curl | bash 场景自装本地命令
-XRAY_RAW_URL="${XRAY_RAW_URL:-https://cdn.jsdelivr.net/gh/ppopcn/shoes_all@main/xray_all.sh}"
+# 远端脚本地址: 用于 curl | bash 场景自装本地命令 (GitHub 直连, 不走 jsdelivr)
+XRAY_RAW_URL="${XRAY_RAW_URL:-https://raw.githubusercontent.com/ppopcn/shoes_all/refs/heads/main/xray_all.sh}"
 
 # ---- 平台探测 ----
 OS_FAMILY=""; INIT_SYS=""; SERVICE_FILE=""
