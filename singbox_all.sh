@@ -3,8 +3,8 @@
 # singbox_all.sh - 一键部署 sing-box 全协议服务端 (all-in-one, 单进程单配置)
 #
 # 架构: 只运行 **一个** sing-box 进程、注册 **一个** 服务(singbox-all)、
-#       使用 **一份** 合并配置(/etc/sing-box/all.json), 6 个入站并存:
-#         MTPROXY / Hysteria2 / TUIC v5 / Shadowsocks / VLESS / VMess
+#       使用 **一份** 合并配置(/etc/sing-box/all.json), 8 个入站并存:
+#         MTPROXY / Hysteria2 / TUIC v5 / Shadowsocks / VLESS / VMess / Trojan / Reality
 #       分发与运行都只有这一个脚本文件。
 #
 # 默认端口计划 (443 的 TCP 与 UDP 互不冲突, 分别给 MT 与 HY2; TUIC 让出 443 用 8443):
@@ -14,6 +14,8 @@
 #   Shadowsocks   8388/tcp+udp
 #   VLESS         8989/tcp      (TLS + WS, 路径 /vless)
 #   VMess         8990/tcp      (TLS + WS, 路径 /vmess)
+#   Trojan        8444/tcp      (TLS 直连)
+#   Reality       8899/tcp      (VLESS + XTLS Reality, 无需证书, 借用 www.microsoft.com 指纹)
 #
 # 跨系统支持:
 #   Debian 系              systemd + apt,      防火墙 ufw / iptables
@@ -23,7 +25,7 @@
 #
 # 用法:
 #   sudo bash singbox_all.sh                    # 全部安装
-#   sudo PROTOCOLS=mt,hy2 bash singbox_all.sh   # 只启用指定协议(mt hy2 tuic ssr vless)
+#   sudo PROTOCOLS=mt,hy2 bash singbox_all.sh   # 只启用指定协议(mt hy2 tuic ssr vless trojan reality)
 #   sudo bash singbox_all.sh plan               # 只打印/校验端口计划, 不安装
 #   sudo bash singbox_all.sh status             # 查看服务状态与端口
 #   sudo bash singbox_all.sh info               # 重新打印全部凭据与链接
@@ -31,11 +33,13 @@
 #   sudo bash singbox_all.sh uninstall          # 卸载
 #
 # 端口环境变量 (只在显式指定时才覆盖; 重装时未指定的端口沿用上次实际值):
-#   MT_PORT / HY2_PORT / TUIC_PORT / SSR_PORT / VLESS_PORT / VMESS_PORT
+#   MT_PORT / HY2_PORT / TUIC_PORT / SSR_PORT / VLESS_PORT / VMESS_PORT / TROJAN_PORT / REALITY_PORT
 # 凭据环境变量 (缺省随机, 重装自动从合并配置复用):
 #   DOMAIN(全部 TLS 协议共用 SNI) MT_USER_NAME MT_CONCURRENCY MT_AUTO_UPDATE
 #   HY2_PASSWORD HY2_OBFS TUIC_UUID TUIC_PASSWORD TUIC_CONGESTION
 #   SSR_PASSWORD SSR_METHOD VLESS_UUID VMESS_UUID VLESS_PATH VMESS_PATH
+#   TROJAN_PASSWORD REALITY_UUID REALITY_DEST(握手目标 host:port)
+#   REALITY_PRIVATE_KEY / REALITY_PUBLIC_KEY / REALITY_SHORT_ID(留空自动生成并复用)
 # 通用: SERVER_ADDR / MIRROR / SINGBOX_TAG / LOG_LEVEL / FORCE_BIN
 #
 set -euo pipefail
@@ -50,7 +54,7 @@ CONFIG_FILE="/etc/sing-box/all.json"
 NEED_CERT=1
 NEED_DOMAIN=1
 
-PROTO_LIST="${PROTOCOLS:-mt,hy2,tuic,ssr,vless}"
+PROTO_LIST="${PROTOCOLS:-mt,hy2,tuic,ssr,vless,trojan,reality}"
 PROTO_LIST="${PROTO_LIST//,/ }"
 
 # 端口计划: 先记录用户是否显式指定(重装时未指定的端口要沿用已有配置)
@@ -66,6 +70,10 @@ VLESS_PORT_SET=0
 [[ -n "${VLESS_PORT+x}" ]] && VLESS_PORT_SET=1
 VMESS_PORT_SET=0
 [[ -n "${VMESS_PORT+x}" ]] && VMESS_PORT_SET=1
+TROJAN_PORT_SET=0
+[[ -n "${TROJAN_PORT+x}" ]] && TROJAN_PORT_SET=1
+REALITY_PORT_SET=0
+[[ -n "${REALITY_PORT+x}" ]] && REALITY_PORT_SET=1
 
 MT_PORT="${MT_PORT:-443}"
 HY2_PORT="${HY2_PORT:-443}"
@@ -73,6 +81,8 @@ TUIC_PORT="${TUIC_PORT:-8443}"
 SSR_PORT="${SSR_PORT:-8388}"
 VLESS_PORT="${VLESS_PORT:-8989}"
 VMESS_PORT="${VMESS_PORT:-8990}"
+TROJAN_PORT="${TROJAN_PORT:-8444}"
+REALITY_PORT="${REALITY_PORT:-8899}"
 
 MT_USER_NAME="${MT_USER_NAME:-user1}"
 MT_CONCURRENCY="${MT_CONCURRENCY:-8192}"
@@ -88,6 +98,15 @@ VLESS_UUID="${VLESS_UUID:-}"
 VMESS_UUID="${VMESS_UUID:-}"
 VLESS_PATH="${VLESS_PATH:-/vless}"
 VMESS_PATH="${VMESS_PATH:-/vmess}"
+TROJAN_PASSWORD="${TROJAN_PASSWORD:-}"
+REALITY_UUID="${REALITY_UUID:-}"
+# Reality 借用的握手目标(需为支持 TLS1.3+H2 的真实站点), SNI 与目标共用同一主机名
+REALITY_DEST="${REALITY_DEST:-www.microsoft.com:443}"
+REALITY_PRIVATE_KEY="${REALITY_PRIVATE_KEY:-}"
+REALITY_PUBLIC_KEY="${REALITY_PUBLIC_KEY:-}"
+REALITY_SHORT_ID="${REALITY_SHORT_ID:-}"
+# Reality 密钥对/公钥没有从私钥反推的命令, 单独存一份元数据供 info 复用
+REALITY_META="/etc/sing-box/reality.json"
 SECRET=""
 
 # 用户显式指定的伪装域名 / SNI, 全部 TLS 协议共用; 留空则沿用旧配置或随机
@@ -1441,17 +1460,17 @@ normalize_protocols() {
   for p in $PROTO_LIST; do
     [[ -n "$p" ]] || continue
     case "$p" in
-      mt|hy2|tuic|ssr|vless) out+="${p}"$'\n' ;;
-      *) die "未知协议: ${p} (可用: mt hy2 tuic ssr vless, 用 PROTOCOLS=mt,hy2,... 选择)" ;;
+      mt|hy2|tuic|ssr|vless|trojan|reality) out+="${p}"$'\n' ;;
+      *) die "未知协议: ${p} (可用: mt hy2 tuic ssr vless trojan reality, 用 PROTOCOLS=mt,hy2,... 选择)" ;;
     esac
   done
   [[ -n "$out" ]] || die "PROTOCOLS 解析结果为空"
   PROTO_LIST="$(printf '%s' "$out" | awk '!seen[$0]++' | tr '\n' ' ')"
   PROTO_LIST="${PROTO_LIST% }"
 
-  # 是否需要 TLS 证书: 有任一 TLS 协议才装 openssl
+  # 是否需要 TLS 证书: 有任一 TLS 协议才装 openssl(Reality 不需要证书)
   NEED_CERT=0
-  if want_proto hy2 || want_proto tuic || want_proto vless; then
+  if want_proto hy2 || want_proto tuic || want_proto vless || want_proto trojan; then
     NEED_CERT=1
   fi
 }
@@ -1466,13 +1485,15 @@ ports_of() {
     tuic)  printf '%s' "$TUIC_PORT" ;;
     ssr)   printf '%s' "$SSR_PORT" ;;
     vless) printf '%s %s' "$VLESS_PORT" "$VMESS_PORT" ;;
+    trojan)  printf '%s' "$TROJAN_PORT" ;;
+    reality) printf '%s' "$REALITY_PORT" ;;
   esac
 }
 
 # 协议占用的网络协议族
 proto_nets() {
   case "$1" in
-    mt|vless) printf 'tcp' ;;
+    mt|vless|trojan|reality) printf 'tcp' ;;
     hy2|tuic) printf 'udp' ;;
     ssr)      printf 'tcp udp' ;;
   esac
@@ -1585,6 +1606,87 @@ for ib in d.get("inbounds", []):
 PY
 }
 
+# 按 tag 精确取字段(Reality 与 VLESS 同为 vless 类型, 必须用 tag 区分)
+# 用法: inbound_pick_tag "reality-in" "tls.reality.private_key"
+inbound_pick_tag() { # <tag> <path>
+  [[ -f "$CONFIG_FILE" ]] || return 0
+  command -v python3 >/dev/null 2>&1 || return 0
+  python3 - "$CONFIG_FILE" "$1" "$2" <<'PY' 2>/dev/null
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(0)
+want, field = sys.argv[2], sys.argv[3]
+for ib in d.get("inbounds", []):
+    if ib.get("tag") != want:
+        continue
+    cur = ib
+    ok = True
+    for part in field.split("."):
+        if isinstance(cur, list):
+            try:
+                cur = cur[int(part)]
+            except (ValueError, IndexError):
+                ok = False
+        elif isinstance(cur, dict):
+            cur = cur[part] if part in cur else None
+            if cur is None:
+                ok = False
+        else:
+            ok = False
+        if not ok:
+            break
+    if ok and isinstance(cur, (str, int)) and not isinstance(cur, bool):
+        print(cur)
+    break
+PY
+}
+
+# 从 Reality 元数据(或合并配置)读密钥对, 供 info 复用
+reality_meta_pick() { # <key>
+  [[ -f "$REALITY_META" ]] || return 0
+  command -v python3 >/dev/null 2>&1 || return 0
+  python3 - "$REALITY_META" "$1" <<'PY' 2>/dev/null
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(0)
+v = d.get(sys.argv[2])
+if isinstance(v, str):
+    print(v)
+PY
+}
+
+reality_meta_save() {
+  mkdir -p "$CONFIG_DIR"
+  python3 - "$REALITY_META" "$REALITY_PRIVATE_KEY" "$REALITY_PUBLIC_KEY" "$REALITY_SHORT_ID" "$REALITY_DEST" <<'PY' 2>/dev/null || true
+import json, sys
+d = {"private_key": sys.argv[2], "public_key": sys.argv[3],
+     "short_id": sys.argv[4], "dest": sys.argv[5]}
+json.dump(d, open(sys.argv[1], "w"), indent=2)
+PY
+  chmod 600 "$REALITY_META" 2>/dev/null || true
+}
+
+# sing-box generate reality-keypair -> "PrivateKey: xxx" / "PublicKey: xxx"
+ensure_reality_keys() {
+  [[ -n "$REALITY_PRIVATE_KEY" && -n "$REALITY_PUBLIC_KEY" ]] && return 0
+  local kp pk="" pub=""
+  kp="$("$BIN_PATH" generate reality-keypair 2>/dev/null)" || kp=""
+  pk="$(printf '%s\n' "$kp" | sed -n 's/^[Pp]rivate[Kk]ey:[[:space:]]*//p' | head -n1)"
+  pub="$(printf '%s\n' "$kp" | sed -n 's/^[Pp]ublic[Kk]ey:[[:space:]]*//p' | head -n1)"
+  if [[ -z "$pk" || -z "$pub" ]]; then
+    pk="$(printf '%s\n' "$kp" | sed -n '1p')"
+    pub="$(printf '%s\n' "$kp" | sed -n '2p')"
+  fi
+  [[ -n "$pk" && -n "$pub" ]] || die "Reality 密钥生成失败 (shoes.. 请检查 ${BIN_PATH} generate reality-keypair)"
+  REALITY_PRIVATE_KEY="$pk"
+  REALITY_PUBLIC_KEY="$pub"
+  ok "已生成 Reality X25519 密钥对"
+}
+
 # OpenRC 未初始化(容器/chroot)时兜底, 保证服务能注册自启
 ensure_openrc_ready() {
   [[ "$INIT_SYSTEM" == "openrc" ]] || return 0
@@ -1634,6 +1736,8 @@ resolve_plan_ports() {
     "ssr:SSR_PORT:shadowsocks:tcp,udp"
     "vless:VLESS_PORT:vless:tcp"
     "vless:VMESS_PORT:vmess:tcp"
+    "trojan:TROJAN_PORT:trojan:tcp"
+    "reality:REALITY_PORT:reality-in:tcp"
   )
   local e proto var type nets p ep newp f assigned=""
 
@@ -1652,7 +1756,12 @@ resolve_plan_ports() {
     p="${!var:-}"
     f="${var}_SET"
     if [[ "${!f:-0}" != "1" ]]; then
-      ep="$(inbound_pick "$type" listen_port)"
+      # type 以 "tag:" 开头时按 tag 精确匹配(Reality 与 VLESS 同类型)
+      if [[ "$type" == *-in ]]; then
+        ep="$(inbound_pick_tag "$type" listen_port)"
+      else
+        ep="$(inbound_pick "$type" listen_port)"
+      fi
       if [[ -n "$ep" ]]; then
         p="$ep"
         info "沿用已有配置端口 ${var}=${p}"
@@ -1723,6 +1832,29 @@ prepare_all_secrets() {
     ok "VLESS UUID: ${VLESS_UUID}"
     ok "VMess UUID: ${VMESS_UUID}"
   fi
+
+  if want_proto trojan; then
+    [[ -n "$TROJAN_PASSWORD" ]] || TROJAN_PASSWORD="$(inbound_pick trojan users.0.password)"
+    [[ -n "$TROJAN_PASSWORD" ]] || TROJAN_PASSWORD="$(rand_token 16)"
+    ok "Trojan 密码: ${TROJAN_PASSWORD}"
+  fi
+
+  if want_proto reality; then
+    [[ -n "$REALITY_UUID" ]] || REALITY_UUID="$(inbound_pick_tag reality-in users.0.uuid)"
+    [[ -n "$REALITY_UUID" ]] || REALITY_UUID="$(gen_uuid)"
+    # 密钥对: 环境变量 > 元数据文件 > 合并配置 > 新生成
+    [[ -n "$REALITY_PRIVATE_KEY" ]] || REALITY_PRIVATE_KEY="$(reality_meta_pick private_key)"
+    [[ -n "$REALITY_PUBLIC_KEY" ]] || REALITY_PUBLIC_KEY="$(reality_meta_pick public_key)"
+    [[ -n "$REALITY_PRIVATE_KEY" ]] || REALITY_PRIVATE_KEY="$(inbound_pick_tag reality-in tls.reality.private_key)"
+    ensure_reality_keys
+    [[ -n "$REALITY_SHORT_ID" ]] || REALITY_SHORT_ID="$(reality_meta_pick short_id)"
+    if [[ -z "$REALITY_SHORT_ID" ]]; then
+      REALITY_SHORT_ID="$(head -c 8 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+    fi
+    reality_meta_save
+    ok "Reality UUID: ${REALITY_UUID}"
+    ok "Reality short_id: ${REALITY_SHORT_ID}  握手目标: ${REALITY_DEST}"
+  fi
 }
 
 # info: 从合并配置反读全部凭据
@@ -1769,6 +1901,26 @@ load_all_credentials() {
     VLESS_PATH="${VLESS_PATH:-/vless}"
     VMESS_PATH="${VMESS_PATH:-/vmess}"
     [[ -n "$VLESS_UUID" && -n "$VMESS_UUID" ]] || die "配置中未解析到 VLESS/VMess UUID"
+  fi
+  if want_proto trojan; then
+    TROJAN_PORT="$(inbound_pick trojan listen_port)"
+    TROJAN_PORT="${TROJAN_PORT:-8444}"
+    TROJAN_PASSWORD="$(inbound_pick trojan users.0.password)"
+    [[ -n "$TROJAN_PASSWORD" ]] || die "配置中未解析到 Trojan 密码"
+  fi
+  if want_proto reality; then
+    REALITY_PORT="$(inbound_pick_tag reality-in listen_port)"
+    REALITY_PORT="${REALITY_PORT:-8899}"
+    REALITY_UUID="$(inbound_pick_tag reality-in users.0.uuid)"
+    [[ -n "$REALITY_UUID" ]] || die "配置中未解析到 Reality 的 VLESS UUID"
+    REALITY_PRIVATE_KEY="$(reality_meta_pick private_key)"
+    [[ -n "$REALITY_PRIVATE_KEY" ]] || REALITY_PRIVATE_KEY="$(inbound_pick_tag reality-in tls.reality.private_key)"
+    REALITY_PUBLIC_KEY="$(reality_meta_pick public_key)"
+    REALITY_SHORT_ID="$(reality_meta_pick short_id)"
+    [[ -n "$REALITY_SHORT_ID" ]] || REALITY_SHORT_ID="$(inbound_pick_tag reality-in tls.reality.short_id.0)"
+    REALITY_DEST="$(reality_meta_pick dest)"
+    [[ -n "$REALITY_DEST" ]] || REALITY_DEST="$(inbound_pick_tag reality-in tls.reality.handshake.server):443"
+    [[ -n "$REALITY_PUBLIC_KEY" ]] || warn "未找到 Reality 公钥, 分享链接里的 pbk 需手动补"
   fi
   if [[ -z "$USER_DOMAIN" ]]; then
     DOMAIN="$(inbound_pick hysteria2 tls.server_name)"
@@ -1965,18 +2117,80 @@ _vmess_inbound() {
 EOF
 }
 
+_trojan_inbound() {
+  cat <<EOF
+    {
+      "type": "trojan",
+      "tag": "trojan-in",
+      "listen": "::",
+      "listen_port": ${TROJAN_PORT},
+      "users": [
+        {
+          "password": "${TROJAN_PASSWORD}"
+        }
+      ],
+      "tls": {
+        "enabled": true,
+        "server_name": "${DOMAIN}",
+        "alpn": [
+          "http/1.1"
+        ],
+        "min_version": "1.2",
+        "certificate_path": "${CERT_FILE}",
+        "key_path": "${KEY_FILE}"
+      }
+    }
+EOF
+}
+
+_reality_inbound() {
+  local dest_host="${REALITY_DEST%%:*}" dest_port="${REALITY_DEST##*:}"
+  [[ "$dest_port" =~ ^[0-9]+$ ]] || dest_port=443
+  cat <<EOF
+    {
+      "type": "vless",
+      "tag": "reality-in",
+      "listen": "::",
+      "listen_port": ${REALITY_PORT},
+      "users": [
+        {
+          "uuid": "${REALITY_UUID}",
+          "flow": "xtls-rprx-vision"
+        }
+      ],
+      "tls": {
+        "enabled": true,
+        "server_name": "${dest_host}",
+        "reality": {
+          "enabled": true,
+          "handshake": {
+            "server": "${dest_host}",
+            "server_port": ${dest_port}
+          },
+          "private_key": "${REALITY_PRIVATE_KEY}",
+          "short_id": [
+            "${REALITY_SHORT_ID}"
+          ]
+        }
+      }
+    }
+EOF
+}
+
 # 合并配置: 单文件包含全部启用协议的入站, 单进程加载
 render_config() {
   local inbs=() ib joined=""
 
-  if want_proto mt;    then inbs+=("$(_mt_inbound)"); fi
-  if want_proto hy2;   then inbs+=("$(_hy2_inbound)"); fi
-  if want_proto tuic;  then inbs+=("$(_tuic_inbound)"); fi
-  if want_proto ssr;   then inbs+=("$(_ssr_inbound)"); fi
-  if want_proto vless; then
+  if want_proto mt;      then inbs+=("$(_mt_inbound)"); fi
+  if want_proto hy2;     then inbs+=("$(_hy2_inbound)"); fi
+  if want_proto tuic;    then inbs+=("$(_tuic_inbound)"); fi
+  if want_proto ssr;     then inbs+=("$(_ssr_inbound)"); fi
+  if want_proto vless;   then
     inbs+=("$(_vless_inbound)")
     inbs+=("$(_vmess_inbound)")
   fi
+  if want_proto trojan;  then inbs+=("$(_trojan_inbound)"); fi
+  if want_proto reality; then inbs+=("$(_reality_inbound)"); fi
 
   for ib in "${inbs[@]}"; do
     [[ -n "$joined" ]] && joined+=","
@@ -2058,6 +2272,19 @@ _vmess_link() {
   printf 'vmess://%s' "$(printf '%s' "$json" | base64 | tr -d '\r\n')"
 }
 
+_trojan_link() {
+  local server="$1"
+  printf 'trojan://%s@%s:%s?security=tls&sni=%s&allowInsecure=1#trojan-%s' \
+    "$TROJAN_PASSWORD" "$server" "$TROJAN_PORT" "$DOMAIN" "$TROJAN_PORT"
+}
+
+_reality_link() {
+  local server="$1" sni="${REALITY_DEST%%:*}"
+  printf 'vless://%s@%s:%s?encryption=none&security=reality&sni=%s&fp=chrome&pbk=%s&sid=%s&type=tcp&flow=xtls-rprx-vision#reality-%s' \
+    "$REALITY_UUID" "$server" "$REALITY_PORT" "$sni" \
+    "$REALITY_PUBLIC_KEY" "$REALITY_SHORT_ID" "$REALITY_PORT"
+}
+
 # ---------------------------------------------------------------- 输出 ------
 # 协议小节标题: ── [N] 名称 · 监听 ──────────
 _sec_head() { # $1=序号 $2=名称 $3=监听描述
@@ -2084,9 +2311,12 @@ print_summary_all() {
   printf '  二进制        : %s\n' "$BIN_PATH"
   printf '  服务名        : %s (单进程)\n' "$SERVICE_NAME"
   printf '  初始化系统    : %s\n' "$INIT_SYSTEM"
-  if want_proto hy2 || want_proto tuic || want_proto vless; then
+  if want_proto hy2 || want_proto tuic || want_proto vless || want_proto trojan; then
     printf '  证书          : %s (自签, 客户端需跳过校验)\n' "$CERT_FILE"
     printf '  SNI / 域名    : %s\n' "$DOMAIN"
+  fi
+  if want_proto reality; then
+    printf '  Reality 目标  : %s (借用其 TLS 指纹)\n' "$REALITY_DEST"
   fi
 
   # ---- 入站总览表 ----
@@ -2098,6 +2328,8 @@ print_summary_all() {
     rows+=("VLESS|${VLESS_PORT}/tcp|TLS + WS")
     rows+=("VMess|${VMESS_PORT}/tcp|TLS + WS")
   fi
+  if want_proto trojan;  then rows+=("Trojan|${TROJAN_PORT}/tcp|TLS 直连"); fi
+  if want_proto reality; then rows+=("Reality|${REALITY_PORT}/tcp|VLESS + XTLS Vision"); fi
 
   printf '\n  %s▍入站总览%s\n' "$C_BLD$C_YEL" "$C_RST"
   printf '  协议            监听端口       说明\n'
@@ -2139,11 +2371,25 @@ print_summary_all() {
     printf '  UUID : %s    WS 路径: %s\n' "$VMESS_UUID" "$VMESS_PATH"
     _link_line "$(_vmess_link "$server")"
   fi
+  if want_proto trojan; then
+    _sec_head "[7]" "Trojan" "${TROJAN_PORT}/tcp"
+    printf '  密码 : %s\n' "$TROJAN_PASSWORD"
+    _link_line "$(_trojan_link "$server")"
+  fi
+  if want_proto reality; then
+    _sec_head "[8]" "Reality" "${REALITY_PORT}/tcp"
+    printf '  UUID : %s\n' "$REALITY_UUID"
+    printf '  SNI  : %s (借用其证书指纹)\n' "${REALITY_DEST%%:*}"
+    printf '  PBK  : %s\n' "$REALITY_PUBLIC_KEY"
+    printf '  SID  : %s\n' "$REALITY_SHORT_ID"
+    _link_line "$(_reality_link "$server")"
+  fi
 
   # ---- 客户端提示 ----
   printf '\n  %s▍客户端提示%s\n' "$C_BLD$C_YEL" "$C_RST"
   printf '  · TLS 协议记得开启 "允许不安全证书 / allowInsecure"\n'
   printf '  · Shadowsocks 客户端请选 "Shadowsocks", 不是 "ShadowsocksR"\n'
+  printf '  · Reality 无需证书: 客户端填 pbk + sid 即可, SNI 必须是 %s\n' "${REALITY_DEST%%:*}"
   print_manage_block
 }
 
@@ -2175,7 +2421,7 @@ do_install_all() {
 
   install_binary
 
-  if want_proto hy2 || want_proto tuic || want_proto vless; then
+  if want_proto hy2 || want_proto tuic || want_proto vless || want_proto trojan; then
     ensure_cert "$DOMAIN"
   fi
 
@@ -2216,11 +2462,12 @@ singbox_all.sh - 一键部署 sing-box 全协议服务端 (单进程 + 单合并
       /etc/sing-box/all.json 里同时挂全部入站:
         MTPROXY 443/tcp / Hysteria2 443/udp / TUIC 8443/udp
         Shadowsocks 8388/tcp+udp / VLESS 8989/tcp / VMess 8990/tcp
+        Trojan 8444/tcp / Reality 8899/tcp
       (443 的 TCP 与 UDP 互不冲突, 分别给 MT 与 HY2; TUIC 让出 443)
 
 用法:
   sudo bash singbox_all.sh                    # 全部安装
-  sudo PROTOCOLS=mt,hy2 bash singbox_all.sh   # 只启用指定协议(mt hy2 tuic ssr vless)
+  sudo PROTOCOLS=mt,hy2 bash singbox_all.sh   # 只启用指定协议(mt hy2 tuic ssr vless trojan reality)
   sudo bash singbox_all.sh plan               # 只打印/校验端口计划, 不安装
   sudo bash singbox_all.sh status             # 查看服务状态与端口
   sudo bash singbox_all.sh info               # 重新打印全部凭据与链接
@@ -2229,7 +2476,8 @@ singbox_all.sh - 一键部署 sing-box 全协议服务端 (单进程 + 单合并
   sudo bash singbox_all.sh help               # 本帮助
 
 端口环境变量 (显式指定才覆盖, 重装未指定则沿用上次实际端口):
-  MT_PORT=443 HY2_PORT=443 TUIC_PORT=8443 SSR_PORT=8388 VLESS_PORT=8989 VMESS_PORT=8990
+  MT_PORT=443 HY2_PORT=443 TUIC_PORT=8443 SSR_PORT=8388
+  VLESS_PORT=8989 VMESS_PORT=8990 TROJAN_PORT=8444 REALITY_PORT=8899
 
 凭据环境变量 (缺省随机, 重装自动从合并配置复用):
   DOMAIN=www.bing.com                        # 全部 TLS 协议共用 SNI
@@ -2238,6 +2486,10 @@ singbox_all.sh - 一键部署 sing-box 全协议服务端 (单进程 + 单合并
   TUIC_UUID=xxx TUIC_PASSWORD=xxx TUIC_CONGESTION=bbr
   SSR_PASSWORD=xxx SSR_METHOD=aes-256-gcm
   VLESS_UUID=xxx VMESS_UUID=xxx VLESS_PATH=/vless VMESS_PATH=/vmess
+  TROJAN_PASSWORD=xxx
+  REALITY_UUID=xxx REALITY_DEST=www.microsoft.com:443
+  REALITY_PRIVATE_KEY=xxx REALITY_PUBLIC_KEY=xxx REALITY_SHORT_ID=xxx
+                                             # 留空则 generate reality-keypair 自动生成, 存 /etc/sing-box/reality.json
   CERT_FILE=... KEY_FILE=...                 # 使用已有证书(不填则自签一份共用)
 
 通用环境变量:
