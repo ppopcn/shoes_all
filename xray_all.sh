@@ -219,6 +219,9 @@ ensure_reality_keys() {
   REALITY_PRIVATE_KEY=$(printf '%s\n' "$kp" | sed -n 's/^.*[Pp]rivate *[Kk]ey:[[:space:]]*//p' | head -1 | tr -d '\r')
   REALITY_PUBLIC_KEY=$(printf '%s\n' "$kp" | sed -n 's/^.*[Pp]ublic[K ]*[Kk]ey)\{0,1\}:[[:space:]]*//p' | head -1 | tr -d '\r')
   [ -n "$REALITY_PRIVATE_KEY" ] && [ -n "$REALITY_PUBLIC_KEY" ] || die "Reality 密钥解析失败: $kp"
+  # base64url 43 字符校验, 防止解析残留前缀(如 ")")静默写坏凭据
+  echo "$REALITY_PRIVATE_KEY" | grep -qE '^[A-Za-z0-9_-]{43}$' || die "Reality 私钥格式异常: $REALITY_PRIVATE_KEY"
+  echo "$REALITY_PUBLIC_KEY"  | grep -qE '^[A-Za-z0-9_-]{43}$' || die "Reality 公钥格式异常: $REALITY_PUBLIC_KEY"
   # 持久化到凭据文件, 重装时复用
   if grep -q '^REALITY_PRIVATE_KEY=' "$CREDS_FILE"; then
     sed -i "s|^REALITY_PRIVATE_KEY=.*|REALITY_PRIVATE_KEY='${REALITY_PRIVATE_KEY}'|" "$CREDS_FILE"
