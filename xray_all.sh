@@ -211,8 +211,11 @@ ensure_reality_keys() {
   info "生成 Reality X25519 密钥对..."
   local kp
   kp=$("$BIN_PATH" x25519 2>/dev/null) || die "Reality 密钥生成失败"
-  REALITY_PRIVATE_KEY=$(printf '%s\n' "$kp" | sed -n 's/.*[Pp]rivate *[Kk]ey[: ]*//p' | head -1 | tr -d '\r')
-  REALITY_PUBLIC_KEY=$(printf '%s\n' "$kp" | sed -n 's/.*[Pp]ublic *[Kk]ey[: ]*//p' | head -1 | tr -d '\r')
+  # 兼容两种输出格式:
+  #   旧: "Private key: xxx" / "Public key: xxx"
+  #   新(26.x+): "PrivateKey: xxx" / "Password (PublicKey): xxx" (+ Hash32 行)
+  REALITY_PRIVATE_KEY=$(printf '%s\n' "$kp" | sed -n 's/^.*[Pp]rivate *[Kk]ey:[[:space:]]*//p' | head -1 | tr -d '\r')
+  REALITY_PUBLIC_KEY=$(printf '%s\n' "$kp" | sed -n 's/^.*[Pp]ublic[K ]*[Kk]ey)\{0,1\}:[[:space:]]*//p' | head -1 | tr -d '\r')
   [ -n "$REALITY_PRIVATE_KEY" ] && [ -n "$REALITY_PUBLIC_KEY" ] || die "Reality 密钥解析失败: $kp"
   # 持久化到凭据文件, 重装时复用
   if grep -q '^REALITY_PRIVATE_KEY=' "$CREDS_FILE"; then
@@ -525,7 +528,7 @@ print_summary() {
   local ip sni ver rows=() r n l d
   ip=$(detect_public_ip)
   sni="$DOMAIN"
-  ver=$("$BIN_PATH" version 2>&1 | head -1)
+  ver=$( { "$BIN_PATH" version 2>&1 || true; } | sed -n '1p' )
 
   echo
   printf '  %s============================================================%s\n' "$C_BLD$C_BLU" "$C_RST"
