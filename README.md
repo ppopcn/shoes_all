@@ -31,7 +31,7 @@ curl -fsSL https://raw.githubusercontent.com/ppopcn/shoes_all/<commit-sha>/shoes
 ```
 </details>
 
-### sing-box 全家桶（8 协议）
+### sing-box 全家桶（8 协议 且支持MTPROXY）
 
 ```bash
 curl -fsSL https://cdn.jsdelivr.net/gh/ppopcn/shoes_all@main/singbox_all.sh | sudo bash
