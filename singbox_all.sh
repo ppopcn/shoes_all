@@ -25,7 +25,7 @@
 #
 # 用法:
 #   sudo bash singbox_all.sh                    # 全部安装
-#   sudo PROTOCOLS=mt,hy2 bash singbox_all.sh   # 只启用指定协议(mt hy2 tuic ss vless trojan reality)
+#   sudo PROTOCOLS=mt,hy2 bash singbox_all.sh   # 只启用指定协议(mt hy2 tuic ss vless vmess trojan reality)
 #   sudo bash singbox_all.sh plan               # 只打印/校验端口计划, 不安装
 #   sudo bash singbox_all.sh status             # 查看服务状态与端口
 #   sudo bash singbox_all.sh info               # 重新打印全部凭据与链接
@@ -54,7 +54,7 @@ CONFIG_FILE="/etc/sing-box/all.json"
 NEED_CERT=1
 NEED_DOMAIN=1
 
-PROTO_LIST="${PROTOCOLS:-mt,hy2,tuic,ss,vless,trojan,reality}"
+PROTO_LIST="${PROTOCOLS:-mt,hy2,tuic,ss,vless,vmess,trojan,reality}"
 PROTO_LIST="${PROTO_LIST//,/ }"
 
 # 端口计划: 先记录用户是否显式指定(重装时未指定的端口要沿用已有配置)
@@ -1461,8 +1461,8 @@ normalize_protocols() {
     [[ -n "$p" ]] || continue
     if [ "$p" = "ss" ]; then p=ssr; fi   # 对外统一用 ss(兼容旧写法 ssr), 内部标识符仍为 ssr
     case "$p" in
-      mt|hy2|tuic|ssr|vless|trojan|reality) out+="${p}"$'\n' ;;
-      *) die "未知协议: ${p} (可用: mt hy2 tuic ss vless trojan reality, 用 PROTOCOLS=mt,hy2,... 选择)" ;;
+      mt|hy2|tuic|ssr|vless|vmess|trojan|reality) out+="${p}"$'\n' ;;
+      *) die "未知协议: ${p} (可用: mt hy2 tuic ss vless vmess trojan reality, 用 PROTOCOLS=mt,hy2,... 选择)" ;;
     esac
   done
   [[ -n "$out" ]] || die "PROTOCOLS 解析结果为空"
@@ -1471,7 +1471,7 @@ normalize_protocols() {
 
   # 是否需要 TLS 证书: 有任一 TLS 协议才装 openssl(Reality 不需要证书)
   NEED_CERT=0
-  if want_proto hy2 || want_proto tuic || want_proto vless || want_proto trojan; then
+  if want_proto hy2 || want_proto tuic || want_proto vless || want_proto vmess || want_proto trojan; then
     NEED_CERT=1
   fi
 }
@@ -1485,7 +1485,8 @@ ports_of() {
     hy2)   printf '%s' "$HY2_PORT" ;;
     tuic)  printf '%s' "$TUIC_PORT" ;;
     ssr)   printf '%s' "$SSR_PORT" ;;
-    vless) printf '%s %s' "$VLESS_PORT" "$VMESS_PORT" ;;
+    vless)  printf '%s' "$VLESS_PORT" ;;
+    vmess)  printf '%s' "$VMESS_PORT" ;;
     trojan)  printf '%s' "$TROJAN_PORT" ;;
     reality) printf '%s' "$REALITY_PORT" ;;
   esac
@@ -1494,7 +1495,7 @@ ports_of() {
 # 协议占用的网络协议族
 proto_nets() {
   case "$1" in
-    mt|vless|trojan|reality) printf 'tcp' ;;
+    mt|vless|vmess|trojan|reality) printf 'tcp' ;;
     hy2|tuic) printf 'udp' ;;
     ssr)      printf 'tcp udp' ;;
   esac
@@ -1535,7 +1536,7 @@ plan_summary() {
 validate_plan() {
   local p pp e entries="" found port protos a b
 
-  if want_proto vless; then
+  if want_proto vless && want_proto vmess; then
     [[ "$VLESS_PORT" != "$VMESS_PORT" ]] \
       || die "VLESS_PORT 与 VMESS_PORT 不能相同 (sing-box 每端口只能一个入站)"
   fi
@@ -1736,7 +1737,7 @@ resolve_plan_ports() {
     "tuic:TUIC_PORT:tuic:udp"
     "ssr:SSR_PORT:shadowsocks:tcp,udp"
     "vless:VLESS_PORT:vless:tcp"
-    "vless:VMESS_PORT:vmess:tcp"
+    "vmess:VMESS_PORT:vmess:tcp"
     "trojan:TROJAN_PORT:trojan:tcp"
     "reality:REALITY_PORT:reality-in:tcp"
   )
@@ -1827,10 +1828,13 @@ prepare_all_secrets() {
 
   if want_proto vless; then
     [[ -n "$VLESS_UUID" ]] || VLESS_UUID="$(inbound_pick vless users.0.uuid)"
-    [[ -n "$VMESS_UUID" ]] || VMESS_UUID="$(inbound_pick vmess users.0.uuid)"
     [[ -n "$VLESS_UUID" ]] || VLESS_UUID="$(gen_uuid)"
-    [[ -n "$VMESS_UUID" ]] || VMESS_UUID="$(gen_uuid)"
     ok "VLESS UUID: ${VLESS_UUID}"
+  fi
+
+  if want_proto vmess; then
+    [[ -n "$VMESS_UUID" ]] || VMESS_UUID="$(inbound_pick vmess users.0.uuid)"
+    [[ -n "$VMESS_UUID" ]] || VMESS_UUID="$(gen_uuid)"
     ok "VMess UUID: ${VMESS_UUID}"
   fi
 
@@ -1895,13 +1899,16 @@ load_all_credentials() {
   if want_proto vless; then
     VLESS_PORT="$(inbound_pick vless listen_port)"
     VLESS_PORT="${VLESS_PORT:-8989}"
-    VMESS_PORT="$(inbound_pick vmess listen_port)"
-    VMESS_PORT="${VMESS_PORT:-$((VLESS_PORT + 1))}"
     VLESS_UUID="$(inbound_pick vless users.0.uuid)"
-    VMESS_UUID="$(inbound_pick vmess users.0.uuid)"
     VLESS_PATH="${VLESS_PATH:-/vless}"
+    [[ -n "$VLESS_UUID" ]] || die "配置中未解析到 VLESS UUID"
+  fi
+  if want_proto vmess; then
+    VMESS_PORT="$(inbound_pick vmess listen_port)"
+    VMESS_PORT="${VMESS_PORT:-8990}"
+    VMESS_UUID="$(inbound_pick vmess users.0.uuid)"
     VMESS_PATH="${VMESS_PATH:-/vmess}"
-    [[ -n "$VLESS_UUID" && -n "$VMESS_UUID" ]] || die "配置中未解析到 VLESS/VMess UUID"
+    [[ -n "$VMESS_UUID" ]] || die "配置中未解析到 VMess UUID"
   fi
   if want_proto trojan; then
     TROJAN_PORT="$(inbound_pick trojan listen_port)"
@@ -2186,10 +2193,8 @@ render_config() {
   if want_proto hy2;     then inbs+=("$(_hy2_inbound)"); fi
   if want_proto tuic;    then inbs+=("$(_tuic_inbound)"); fi
   if want_proto ssr;     then inbs+=("$(_ssr_inbound)"); fi
-  if want_proto vless;   then
-    inbs+=("$(_vless_inbound)")
-    inbs+=("$(_vmess_inbound)")
-  fi
+  if want_proto vless;   then inbs+=("$(_vless_inbound)"); fi
+  if want_proto vmess;   then inbs+=("$(_vmess_inbound)"); fi
   if want_proto trojan;  then inbs+=("$(_trojan_inbound)"); fi
   if want_proto reality; then inbs+=("$(_reality_inbound)"); fi
 
@@ -2312,7 +2317,7 @@ print_summary_all() {
   printf '  二进制        : %s\n' "$BIN_PATH"
   printf '  服务名        : %s (单进程)\n' "$SERVICE_NAME"
   printf '  初始化系统    : %s\n' "$INIT_SYSTEM"
-  if want_proto hy2 || want_proto tuic || want_proto vless || want_proto trojan; then
+  if want_proto hy2 || want_proto tuic || want_proto vless || want_proto vmess || want_proto trojan; then
     printf '  证书          : %s (自签, 客户端需跳过校验)\n' "$CERT_FILE"
     printf '  SNI / 域名    : %s\n' "$DOMAIN"
   fi
@@ -2327,6 +2332,8 @@ print_summary_all() {
   if want_proto ssr;   then rows+=("Shadowsocks|${SSR_PORT}/tcp+udp|AEAD 加密"); fi
   if want_proto vless; then
     rows+=("VLESS|${VLESS_PORT}/tcp|TLS + WS")
+  fi
+  if want_proto vmess; then
     rows+=("VMess|${VMESS_PORT}/tcp|TLS + WS")
   fi
   if want_proto trojan;  then rows+=("Trojan|${TROJAN_PORT}/tcp|TLS 直连"); fi
@@ -2368,6 +2375,8 @@ print_summary_all() {
     _sec_head "[5]" "VLESS" "${VLESS_PORT}/tcp"
     printf '  UUID : %s    WS 路径: %s\n' "$VLESS_UUID" "$VLESS_PATH"
     _link_line "$(_vless_link "$server")"
+  fi
+  if want_proto vmess; then
     _sec_head "[6]" "VMess" "${VMESS_PORT}/tcp"
     printf '  UUID : %s    WS 路径: %s\n' "$VMESS_UUID" "$VMESS_PATH"
     _link_line "$(_vmess_link "$server")"
@@ -2422,7 +2431,7 @@ do_install_all() {
 
   install_binary
 
-  if want_proto hy2 || want_proto tuic || want_proto vless || want_proto trojan; then
+  if want_proto hy2 || want_proto tuic || want_proto vless || want_proto vmess || want_proto trojan; then
     ensure_cert "$DOMAIN"
   fi
 
@@ -2468,7 +2477,7 @@ singbox_all.sh - 一键部署 sing-box 全协议服务端 (单进程 + 单合并
 
 用法:
   sudo bash singbox_all.sh                    # 全部安装
-  sudo PROTOCOLS=mt,hy2 bash singbox_all.sh   # 只启用指定协议(mt hy2 tuic ss vless trojan reality)
+  sudo PROTOCOLS=mt,hy2 bash singbox_all.sh   # 只启用指定协议(mt hy2 tuic ss vless vmess trojan reality)
   sudo bash singbox_all.sh plan               # 只打印/校验端口计划, 不安装
   sudo bash singbox_all.sh status             # 查看服务状态与端口
   sudo bash singbox_all.sh info               # 重新打印全部凭据与链接
