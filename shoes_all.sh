@@ -3,6 +3,9 @@
 # shoes_all.sh — shoes 全家桶一键部署脚本 (参考 singbox_all.sh 架构)
 # 核心: https://github.com/cfal/shoes (Rust 多协议代理服务端)
 #
+# 平台: Debian 系(systemd+apt) / RHEL 系(systemd+dnf/yum) / Alpine(OpenRC+apk)
+#       架构 x86_64 / aarch64 (官方 musl 静态包, glibc 发行版通用)
+#
 # 用法:
 #   sudo bash shoes_all.sh install    # 安装(默认全部协议)
 #   sudo bash shoes_all.sh plan       # 只打印端口计划
@@ -96,6 +99,13 @@ check_deps() {
 rand_uuid() { have uuidgen && uuidgen || cat /proc/sys/kernel/random/uuid; }
 rand_pass() { openssl rand -base64 24 | tr -d '/+=' | head -c 24; }
 rand_hex()  { openssl rand -hex "$1"; }
+
+check_selinux() {
+  have getenforce || return 0
+  [ "$(getenforce 2>/dev/null)" = "Enforcing" ] || return 0
+  warn "SELinux 处于 Enforcing (RHEL/CentOS 常见)"
+  warn "若服务起不来, 先看 /var/log/audit/audit.log; 可用 setenforce 0 临时验证是否 SELinux 拦截"
+}
 
 # ---- 凭据生成 / 复用 ----
 load_or_init_creds() {
@@ -354,17 +364,21 @@ WantedBy=multi-user.target
 EOF
     systemctl daemon-reload
   else
+    # OpenRC(Alpine): 用 supervise-daemon 才能把 stdout/stderr 落到 output_log,
+    # 旧的 command_background + start-stop-daemon 会忽略 output_log(日志丢失)
     cat > "$SERVICE_FILE" <<EOF
 #!/sbin/openrc-run
 name="${SERVICE_NAME}"
 command="${BIN_PATH}"
 command_args="${CONF_FILE}"
-command_background="yes"
-pidfile="/run/\${RC_SVCNAME}.pid"
+supervisor="supervise-daemon"
+respawn_delay=3
+respawn_max=0
 output_log="/var/log/${SERVICE_NAME}.log"
 error_log="/var/log/${SERVICE_NAME}.log"
+export RUST_LOG="${LOG_LEVEL}"
 
-depend() { need net; }
+depend() { need net; after firewall; }
 EOF
     chmod +x "$SERVICE_FILE"
   fi
@@ -600,6 +614,7 @@ do_install() {
   info "协议: ${PROTOCOLS}"
   detect_platform
   check_deps
+  check_selinux
   validate_plan
   load_or_init_creds
   ensure_cert
