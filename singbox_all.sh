@@ -148,7 +148,7 @@ KEY_FILE="${KEY_FILE:-${CONFIG_DIR}/key.pem}"
 
 # 版本固定: 上游更新可能改动入站字段, 导致本项目配置失效, 因此锁版本。
 # 需要试新版时: SINGBOX_TAG=v1.15.0-extended-2.8.0 bash singbox_xxx.sh
-SINGBOX_TAG="${SINGBOX_TAG:-v1.14.1-extended-2.7.2}"
+SINGBOX_TAG="${SINGBOX_TAG:-v1.14.3-extended-2.7.3}"
 SINGBOX_API="https://api.github.com/repos/${REPO}/releases"
 
 MIRROR="${MIRROR:-}"
@@ -2094,7 +2094,10 @@ ${joined}
   ],
   "route": {
     "final": "direct",
-    "default_domain_resolver": "default"
+    "default_domain_resolver": {
+      "server": "default",
+      "strategy": "prefer_ipv4"
+    }
   }
 }
 EOF
@@ -2373,7 +2376,7 @@ singbox_all.sh - 一键部署 sing-box 全协议服务端 (单进程 + 单合并
 通用环境变量:
   SERVER_ADDR=1.2.3.4                        # 指定对外 IP
   MIRROR=https://ghfast.top                   # GitHub 加速前缀(只写前缀, 脚本会拼 /https://github.com/...)
-  SINGBOX_TAG=v1.14.1-extended-2.7.2         # 覆盖锁定的内核版本
+  SINGBOX_TAG=v1.14.3-extended-2.7.3         # 覆盖锁定的内核版本
   LOG_LEVEL=debug                            # 日志级别(默认 info)
   FORCE_BIN=1                                # 强制重新下载内核
 

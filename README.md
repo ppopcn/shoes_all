@@ -107,7 +107,7 @@ sudo env PROTOCOLS=vless bash shoes_all.sh          # 已 sudo 时
 | 变量            | 适用           | 说明                                                        |
 | ------------- | ------------ | --------------------------------------------------------- |
 | `SHOES_TAG`   | shoes        | 默认 `v0.3.3`（已验证）；传 `latest` 联网取最新 release                 |
-| `SINGBOX_TAG` | sing-box     | 默认 `v1.14.1-extended-2.7.2`（已验证）；传 `latest` 取最新（API 失败报错） |
+| `SINGBOX_TAG` | sing-box     | 默认 `v1.14.3-extended-2.7.3`（已验证）；传 `latest` 取最新（API 失败报错） |
 | `XRAY_TAG`    | xray         | 默认 `v26.3.27`（已验证）；传 `latest` 取最新（API 失败回退默认）             |
 | `FORCE_BIN=1` | sing-box     | 强制重新下载二进制                                                 |
 | `<NAME>_V`    | shoes / xray | 显式覆盖凭据，如 `HY2_PASSWORD_V=xxx`（重装想固定密码时用）                  |
@@ -204,7 +204,7 @@ sudo SINGBOX_TAG=v1.14.3-extended-2.7.3 bash singbox_all.sh install
 | 脚本       | 安装锁定默认                     | update 默认      | latest 行为                                    |
 | -------- | ------------------------ | --------------- | -------------------------------------------- |
 | shoes    | `v0.3.3`                 | 上游最新            | 取 releases 列表第 1 条，失败回退锁定版本并告警                |
-| sing-box | `v1.14.1-extended-2.7.2` | （无 update 子命令）  | 取 releases 列表第 1 条，失败直接报错（可 `SINGBOX_TAG=v...` 指定） |
+| sing-box | `v1.14.3-extended-2.7.3` | （无 update 子命令）  | 取 releases 列表第 1 条，失败直接报错（可 `SINGBOX_TAG=v...` 指定） |
 | xray     | `v26.3.27`               | 上游最新            | 取 releases 列表第 1 条，失败回退锁定版本并告警                |
 
 
