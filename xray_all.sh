@@ -671,7 +671,7 @@ do_install() {
 
 cmd_update() {
   detect_platform; install_binary; start_service; install_self
-  log "升级完成: $("$BIN_PATH" version 2>&1 | head -1)"
+  log "升级完成: $( { "$BIN_PATH" version 2>&1 || true; } | sed -n 1p )"
 }
 
 cmd_status() {
