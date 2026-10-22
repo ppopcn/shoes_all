@@ -21,7 +21,7 @@
 # 环境变量:
 #   PROTOCOLS=reality,vless,vmess,trojan,ss   选择启用的协议(逗号分隔)
 #   REALITY_PORT=443 VLESS_PORT=8989 VMESS_PORT=8990 TROJAN_PORT=8444 SS_PORT=8388
-#   REALITY_DEST=www.microsoft.com:443   Reality 握手目标(借用其 TLS 指纹)
+#   REALITY_DEST=www.cloudflare.com:443  Reality 握手目标(借用其 TLS 指纹; 勿用 microsoft.com, 证书超 8192 上限)
 #   DOMAIN=xxx.com                  SNI/证书域名(默认随机伪装域名)
 #   XRAY_TAG=v26.3.27               锁定版本(默认即该版本; 传 latest 则联网取最新 release)
 #   MIRROR=https://ghfast.top/      GitHub 下载镜像前缀
@@ -84,6 +84,10 @@ die()  { printf '%s[x]%s %s\n' "$C_RED" "$C_RST" "$*" >&2; exit 1; }
 log()  { info "$*"; }
 hr()   { printf '%s\n' "------------------------------------------------------------"; }
 have() { command -v "$1" >/dev/null 2>&1; }
+
+check_root() {
+  [ "$(id -u)" = "0" ] || die "请用 root 运行: sudo bash $0 ${1:-install}"
+}
 
 check_deps() {
   local pkgs=""
@@ -154,13 +158,37 @@ ensure_cert() {
   [ -f "$CERT_FILE" ] && [ -f "$KEY_FILE" ] && { ok "复用已有证书: $CERT_FILE"; return; }
   [ -n "$user_cert" ] && [ "$CERT_FILE" != "$CERT_FILE_DEFAULT" ] && die "指定证书不存在: $CERT_FILE"
   info "生成自签证书 (CN=${DOMAIN}, 10 年有效期)..."
-  openssl req -new -newkey rsa:2048 -days 3650 -nodes -x509 \
-    -subj "/CN=${DOMAIN}" \
-    -addext "subjectAltName=DNS:${DOMAIN},DNS:*.${DOMAIN},IP:0.0.0.0" \
-    -keyout "$KEY_FILE" -out "$CERT_FILE" >/dev/null 2>&1 \
-    || die "证书生成失败"
+  local san="DNS:${DOMAIN},DNS:*.${DOMAIN},IP:0.0.0.0"
+  if openssl req -help 2>&1 | grep -q -- '-addext'; then
+    openssl req -new -newkey rsa:2048 -days 3650 -nodes -x509 \
+      -subj "/CN=${DOMAIN}" -addext "subjectAltName=${san}" \
+      -keyout "$KEY_FILE" -out "$CERT_FILE" >/dev/null 2>&1 \
+      || die "证书生成失败"
+  else
+    # 老版本 OpenSSL(<1.1.1, 如 CentOS 7) 没有 -addext, 用配置文件方式
+    local cnf; cnf=$(mktemp)
+    cat > "$cnf" <<EOF
+[req]
+distinguished_name=dn
+x509_extensions=v3
+prompt=no
+[dn]
+CN=${DOMAIN}
+[v3]
+subjectAltName=${san}
+EOF
+    openssl req -new -newkey rsa:2048 -days 3650 -nodes -x509 \
+      -config "$cnf" -keyout "$KEY_FILE" -out "$CERT_FILE" >/dev/null 2>&1
+    local rc=$?
+    rm -f "$cnf"
+    [ "$rc" = "0" ] || die "证书生成失败"
+  fi
   chmod 600 "$KEY_FILE"
   ok "证书已生成: $CERT_FILE"
+}
+
+need_cert() {
+  enabled vless || enabled vmess || enabled trojan
 }
 
 # ---- 二进制安装 ----
@@ -190,8 +218,9 @@ install_binary() {
   local tag; tag=$(resolve_tag)
   [ -n "$tag" ] || tag="$XRAY_TAG_DEFAULT"
   if [ -x "$BIN_PATH" ]; then
-    local cur; cur=$("$BIN_PATH" version 2>/dev/null | head -1 || true)
-    if echo "$cur" | grep -q "$tag"; then ok "已安装 ${cur:-未知}, 跳过下载"; return; fi
+    local cur; cur=$("$BIN_PATH" version 2>/dev/null | sed -n 1p || true)
+    # Xray 的 version 输出不带 v 前缀(Xray 26.3.27 ...), 比较时去掉 tag 的 v
+    if echo "$cur" | grep -q "${tag#v}"; then ok "已安装 ${cur:-未知}, 跳过下载"; return; fi
     warn "现有版本: ${cur:-未知}, 准备升级到 ${tag}"
   fi
   local asset url
@@ -380,10 +409,18 @@ EOF
 
   chmod 600 "$CONF_FILE"
   ok "配置已写入: ${CONF_FILE}"
-  # 配置自检
-  "$BIN_PATH" run -test -c "$CONF_FILE" >/dev/null 2>&1 \
-    || "$BIN_PATH" -test -c "$CONF_FILE" >/dev/null 2>&1 \
-    || { warn "配置校验失败!"; "$BIN_PATH" run -test -c "$CONF_FILE" || return 1; }
+  # 配置自检: 失败则回滚, 避免留下坏配置把服务弄挂
+  if ! "$BIN_PATH" run -test -c "$CONF_FILE" >/dev/null 2>&1; then
+    warn "配置校验失败, 输出详情:"
+    "$BIN_PATH" run -test -c "$CONF_FILE" 2>&1 | sed -n '1,10p' || true
+    local lastbak; lastbak=$(ls -t "${CONF_FILE}".bak.* 2>/dev/null | sed -n 1p || true)
+    if [ -n "$lastbak" ]; then
+      cp -f "$lastbak" "$CONF_FILE" && warn "已回滚到上一份有效配置: ${lastbak}"
+    else
+      rm -f "$CONF_FILE"; warn "无历史配置可回滚, 已删除无效配置"
+    fi
+    return 1
+  fi
   ok "配置校验通过"
 }
 
@@ -430,7 +467,8 @@ EOF
 
 open_firewall() {
   local ports="" p pn pr handled=0
-  enabled ss && ports="$ports ${SS_PORT}" || true
+  # SS 入站同时监听 tcp+udp, 两个都要放行
+  enabled ss && ports="$ports ${SS_PORT} ${SS_PORT}/udp" || true
   enabled vless && ports="$ports ${VLESS_PORT}" || true
   enabled vmess && ports="$ports ${VMESS_PORT}" || true
   enabled trojan && ports="$ports ${TROJAN_PORT}" || true
@@ -622,10 +660,15 @@ print_summary() {
 }
 
 validate_plan() {
-  local dup
-  dup=$(echo "$REALITY_PORT $VLESS_PORT $VMESS_PORT $TROJAN_PORT $SS_PORT" | tr ' ' '\n' | sort | uniq -d)
-  if [ -n "$dup" ]; then die "存在重复端口, 请调整: $dup"; fi
-  ok "端口计划: reality=${REALITY_PORT} vless=${VLESS_PORT} vmess=${VMESS_PORT} trojan=${TROJAN_PORT} ss=${SS_PORT}"
+  local dup ports="" p
+  enabled reality && ports="$ports $REALITY_PORT" || true
+  enabled vless   && ports="$ports $VLESS_PORT" || true
+  enabled vmess   && ports="$ports $VMESS_PORT" || true
+  enabled trojan  && ports="$ports $TROJAN_PORT" || true
+  enabled ss      && ports="$ports $SS_PORT" || true
+  dup=$(echo "$ports" | tr ' ' '\n' | grep -v '^$' | sort | uniq -d)
+  if [ -n "$dup" ]; then die "已启用协议存在重复端口, 请调整: $dup"; fi
+  ok "端口计划: reality=${REALITY_PORT} vless=${VLESS_PORT} vmess=${VMESS_PORT} trojan=${TROJAN_PORT} ss=${SS_PORT} (仅列出, 未启用的不生效)"
 }
 
 install_self() {
@@ -658,7 +701,7 @@ do_install() {
   check_selinux
   validate_plan
   load_or_init_creds
-  ensure_cert
+  if need_cert; then ensure_cert; else info "未启用 TLS 类协议, 跳过证书生成"; fi
   install_binary
   ensure_reality_keys
   write_config || die "配置写入失败"
@@ -731,7 +774,34 @@ cmd_uninstall() {
   ok "卸载完成"
 }
 
+usage() {
+  # 本地文件: 直接打印头部注释; curl|bash 时 $0 是 bash, 读不到 -> 用内置简版
+  if [ -r "$0" ] && sed -n '2,32p' "$0" 2>/dev/null | grep -q 'PROTOCOLS'; then
+    sed -n '2,32p' "$0"
+  else
+    cat <<'EOF'
+xray_all.sh — Xray-core 全家桶一键部署 (reality/vless/vmess/trojan/ss)
+
+用法:
+  sudo bash xray_all.sh [install|plan|status|info|logs [N]|update|uninstall]
+
+环境变量:
+  PROTOCOLS=reality,vless,vmess,trojan,ss   选择协议(逗号分隔, 默认全装)
+  REALITY_PORT=443 VLESS_PORT=8989 VMESS_PORT=8990 TROJAN_PORT=8444 SS_PORT=8388
+  REALITY_DEST=www.cloudflare.com:443       Reality 握手目标(勿用 microsoft.com)
+  DOMAIN=xxx.com                            SNI/证书域名
+  XRAY_TAG=v26.3.27                         锁定版本; 传 latest 取上游最新
+  MIRROR=https://ghfast.top/                GitHub 下载镜像前缀
+  CERT_FILE/KEY_FILE=...                    使用已有证书
+  SERVER_ADDR=1.2.3.4                       手动指定对外 IP
+EOF
+  fi
+}
+
 main() {
+  case "${1:-install}" in
+    install|update|uninstall) check_root "${1:-install}" ;;&
+  esac
   case "${1:-install}" in
     install)    do_install ;;
     plan)       validate_plan ;;
@@ -741,7 +811,7 @@ main() {
     update)     cmd_update ;;
     uninstall)  cmd_uninstall ;;
     help|-h|--help)
-      sed -n '2,32p' "$0" ;;
+      usage ;;
     *) die "未知命令: $1 (可用: install/plan/status/info/logs/update/uninstall/help)" ;;
   esac
 }

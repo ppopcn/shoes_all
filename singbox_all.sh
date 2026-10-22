@@ -843,6 +843,8 @@ EOF
 write_service_openrc() {
   mkdir -p /etc/init.d
 
+  # 用 supervise-daemon: 崩溃自动拉起, 且能真正把 stdout/stderr 落到 output_log
+  # (旧的 command_background + start-stop-daemon 会忽略 output_log, 日志丢失)
   cat >"$SERVICE_FILE" <<EOF
 #!/sbin/openrc-run
 
@@ -851,39 +853,16 @@ description="${SERVICE_DESC}"
 
 command="${BIN_PATH}"
 command_args="run -c ${CONFIG_FILE}"
-command_background="yes"
 command_user="root"
-pidfile="/run/\${RC_SVCNAME}.pid"
+supervisor="supervise-daemon"
+respawn_delay=3
+respawn_max=0
 
 output_log="/var/log/\${RC_SVCNAME}.log"
 error_log="/var/log/\${RC_SVCNAME}.log"
 
 start_pre() {
     checkpath --directory --mode 0755 /var/log
-}
-
-stop() {
-    local pf="\${pidfile}"
-    ebegin "Stopping \${RC_SVCNAME}"
-    if [ -f "\${pf}" ]; then
-        local pid
-        pid="\$(cat "\${pf}" 2>/dev/null)"
-        if [ -n "\${pid}" ] && kill -0 "\${pid}" 2>/dev/null; then
-            kill -TERM "\${pid}" 2>/dev/null
-            local i=0
-            while [ \$i -lt 10 ] && kill -0 "\${pid}" 2>/dev/null; do
-                sleep 1
-                i=\$((i + 1))
-            done
-            if kill -0 "\${pid}" 2>/dev/null; then
-                ewend 1 "force killing \${RC_SVCNAME} (pid \${pid})"
-                kill -KILL "\${pid}" 2>/dev/null
-                sleep 1
-            fi
-        fi
-        rm -f "\${pf}"
-    fi
-    eend 0
 }
 
 depend() {
@@ -1384,7 +1363,9 @@ cmd_uninstall() {
     warn "保留配置: ${CONFIG_FILE}"
   else
     rm -f "$CONFIG_FILE"
-    ok "已删除配置"
+    # reality.json 含 Reality 私钥, 证书含私钥, 一并清理
+    rm -f "${CONFIG_DIR}/reality.json" "${CERT_FILE}" "${KEY_FILE}"
+    ok "已删除配置 (含 reality.json 与证书)"
   fi
 
   rm -f "${INSTALL_DIR}/singbox-${SHORT_NAME}"
@@ -2504,7 +2485,7 @@ singbox_all.sh - 一键部署 sing-box 全协议服务端 (单进程 + 单合并
 
 通用环境变量:
   SERVER_ADDR=1.2.3.4                        # 指定对外 IP
-  MIRROR=https://ghfast.top/https://github.com
+  MIRROR=https://ghfast.top                   # GitHub 加速前缀(只写前缀, 脚本会拼 /https://github.com/...)
   SINGBOX_TAG=v1.14.1-extended-2.7.2         # 覆盖锁定的内核版本
   LOG_LEVEL=debug                            # 日志级别(默认 info)
   FORCE_BIN=1                                # 强制重新下载内核

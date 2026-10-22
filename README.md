@@ -4,7 +4,7 @@
 
 | 脚本                                 | 内核                                                                          | 协议数 | 适用                                                  |
 | ---------------------------------- | --------------------------------------------------------------------------- | --- | --------------------------------------------------- |
-| [`shoes_all.sh`](shoes_all.sh)     | [cfal/shoes](https://github.com/cfal/shoes)（Rust，静态 musl 二进制）               | 7   | 轻量，无依赖，跑起来就是一个小二进制                                  |
+| [`shoes_all.sh`](shoes_all.sh)     | [cfal/shoes](https://github.com/cfal/shoes)                                 | 7   | 轻量，无依赖，跑起来就是一个小二进制                                  |
 | [`singbox_all.sh`](singbox_all.sh) | [shtorm-7/sing-box-extended](https://github.com/shtorm-7/sing-box-extended) | 8   | 需要 MTPROXY / 更多扩展能力时用                               |
 | [`xray_all.sh`](xray_all.sh)       | [XTLS/Xray-core](https://github.com/XTLS/Xray-core)                         | 5   | Xray 生态正统实现，Reality/Vision 本家；不支持 QUIC 系协议与 MTProto |
 
@@ -33,15 +33,13 @@ curl -fsSL https://raw.githubusercontent.com/ppopcn/shoes_all/refs/heads/main/xr
 ### 装之前先自检（可选）
 
 ```bash
-# shoes：应该输出 1（脚本里含 generate-reality-keypair）
+# 关键字命中说明脚本是含目标特性的新版（grep -q 无输出是正常的）
 U=https://raw.githubusercontent.com/ppopcn/shoes_all/refs/heads/main/shoes_all.sh
 curl -fsSL "$U" | grep -q 'generate-reality-keypair' && curl -fsSL "$U" | sudo bash
 
-# sing-box：应该输出 10（脚本里含 10 处 reality-in）
 U=https://raw.githubusercontent.com/ppopcn/shoes_all/refs/heads/main/singbox_all.sh
 curl -fsSL "$U" | grep -q 'reality-in' && curl -fsSL "$U" | sudo bash
 
-# xray：应该输出 ≥1（脚本里含 x25519）
 U=https://raw.githubusercontent.com/ppopcn/shoes_all/refs/heads/main/xray_all.sh
 curl -fsSL "$U" | grep -q 'x25519' && curl -fsSL "$U" | sudo bash
 ```
@@ -53,7 +51,7 @@ curl -fsSL "$U" | grep -q 'x25519' && curl -fsSL "$U" | sudo bash
 curl -fsSL https://raw.githubusercontent.com/ppopcn/shoes_all/refs/heads/main/shoes_all.sh \
   | sudo PROTOCOLS=hy2,tuic,ss,vless,vmess,trojan,reality bash
 
-# sing-box：可选 mt hy2 tuic ssr vless trojan reality
+# sing-box：可选 mt hy2 tuic ss vless vmess trojan reality（旧写法 ssr 也兼容）
 curl -fsSL https://raw.githubusercontent.com/ppopcn/shoes_all/refs/heads/main/singbox_all.sh \
   | sudo PROTOCOLS=mt,hy2,tuic,ss,vless,vmess,trojan,reality bash
 
@@ -66,7 +64,7 @@ curl -fsSL https://raw.githubusercontent.com/ppopcn/shoes_all/refs/heads/main/xr
 
 ## 环境变量参数
 
-两个脚本都用**环境变量**传参（前缀形式），注意不是位置参数——`sh xxx.sh PROTOCOLS=vless` 会把 `PROTOCOLS=vless` 当子命令报错：
+三个脚本都用**环境变量**传参（前缀形式），注意不是位置参数——`sh xxx.sh PROTOCOLS=vless` 会把 `PROTOCOLS=vless` 当子命令报错：
 
 ```bash
 sudo PROTOCOLS=vless bash shoes_all.sh              # 本地文件
@@ -106,13 +104,13 @@ sudo env PROTOCOLS=vless bash shoes_all.sh          # 已 sudo 时
 
 ### 脚本专属参数
 
-| 变量            | 适用           | 说明                                       |
-| ------------- | ------------ | ---------------------------------------- |
-| `SHOES_TAG`   | shoes        | 默认 `v0.3.3`（已验证）；传 `latest` 联网取最新 release            |
+| 变量            | 适用           | 说明                                                        |
+| ------------- | ------------ | --------------------------------------------------------- |
+| `SHOES_TAG`   | shoes        | 默认 `v0.3.3`（已验证）；传 `latest` 联网取最新 release                 |
 | `SINGBOX_TAG` | sing-box     | 默认 `v1.14.1-extended-2.7.2`（已验证）；传 `latest` 取最新（API 失败报错） |
-| `XRAY_TAG`    | xray         | 默认 `v26.3.27`（已验证）；传 `latest` 取最新（API 失败回退默认）      |
-| `FORCE_BIN=1` | sing-box     | 强制重新下载二进制                                |
-| `<NAME>_V`    | shoes / xray | 显式覆盖凭据，如 `HY2_PASSWORD_V=xxx`（重装想固定密码时用） |
+| `XRAY_TAG`    | xray         | 默认 `v26.3.27`（已验证）；传 `latest` 取最新（API 失败回退默认）             |
+| `FORCE_BIN=1` | sing-box     | 强制重新下载二进制                                                 |
+| `<NAME>_V`    | shoes / xray | 显式覆盖凭据，如 `HY2_PASSWORD_V=xxx`（重装想固定密码时用）                  |
 
 > 三个脚本统一策略：**默认锁死脚本内已验证的版本**（部署结果可复现），需要尝鲜时显式 `XXX_TAG=latest`。
 
@@ -202,11 +200,12 @@ sudo XRAY_TAG=v26.3.27 xray-all update
 sudo SINGBOX_TAG=v1.14.3-extended-2.7.3 bash singbox_all.sh install
 ```
 
-| 脚本 | 锁定默认 | latest 行为 |
-| --- | --- | --- |
-| shoes | `v0.3.3` | 查 GitHub API，失败回退锁定版本并告警 |
+| 脚本       | 锁定默认                     | latest 行为                                    |
+| -------- | ------------------------ | -------------------------------------------- |
+| shoes    | `v0.3.3`                 | 查 GitHub API，失败回退锁定版本并告警                     |
 | sing-box | `v1.14.1-extended-2.7.2` | 查 GitHub API，失败直接报错（可 `SINGBOX_TAG=v...` 指定） |
-| xray | `v26.3.27` | 查 GitHub API，失败回退锁定版本并告警 |
+| xray     | `v26.3.27`               | 查 GitHub API，失败回退锁定版本并告警                     |
+
 
 > 注意：不带 `XXX_TAG=latest` 时，`update` 只会按锁定版本校验/重装，**不会**被动升到上游最新——这是刻意的，保证每次部署结果可复现。
 
@@ -233,11 +232,13 @@ sudo SINGBOX_TAG=v1.14.3-extended-2.7.3 bash singbox_all.sh install
 | ---------------------------- | ------- | --------- | -------------------- |
 | Debian / Ubuntu              | systemd | apt       | ufw → iptables       |
 | CentOS / RHEL / Rocky / Alma | systemd | dnf 或 yum | firewalld → iptables |
-| Alpine                       | OpenRC  | apk       | iptables（规则自动持久化）    |
+| Alpine                       | OpenRC  | apk       | iptables（sing-box 自动持久化；shoes/xray 仅插入规则，重启后可能丢失）    |
 
 - 架构：x86_64 / aarch64（shoes 用官方 musl 静态包，glibc 发行版同样可用；无 32 位 ARM 包）
 - RHEL 系若 SELinux 为 Enforcing，脚本会提示；服务起不来时先看 `/var/log/audit/audit.log`
 - 云服务器安全组需在控制台单独放行，脚本管不到
+- **实测范围**：主要验证在 Debian 13（systemd）上完成；RHEL / Alpine 分支做了静态审查与单元渲染校验，未逐一实机跑通，用前建议先 `plan` 看一眼端口计划
+- sing-box 脚本重装复用旧凭据依赖 `python3`（解析 JSON）；python3 不可用时脚本只打警告，重装会重新生成凭据导致客户端失效——Alpine/RHEL 最小系统请先装 python3
 
 ---
 
@@ -262,6 +263,13 @@ sudo SINGBOX_TAG=v1.14.3-extended-2.7.3 bash singbox_all.sh install
 - 自签证书需要客户端开「允许不安全证书」；有域名的话建议挂真证书（`CERT_FILE` / `KEY_FILE`）
 - 凭据文件权限 600，分享链接等同于账号密码，别贴到公开渠道
 - 仅供个人自建代理、内网穿透等合规用途，请遵守当地法律法规
+
+### 供应链与信任边界（务必了解）
+
+- **安装方式可变**：`curl ... | sudo bash` 拉的是 `main` 分支最新提交，仓库没有 tag/签名；想要可复现安装，用 commit sha 固定：`https://raw.githubusercontent.com/ppopcn/shoes_all/<sha>/xxx.sh`。脚本自装的本地命令（如 `xray-all`）也从 `main` 拉取，可能与本次执行的版本不同
+- **镜像风险**：`MIRROR`（如 `https://ghfast.top`）能解决 GitHub 不通的问题，但等于多信任一个中间方；配合哈希校验才安全，而目前 **shoes / xray 下载二进制未做 sha256 校验**（sing-box 有，但依赖 GitHub API 可用）。敏感环境建议不要用镜像
+- **自签证书 + 随机 SNI 不等于伪装**：这类 TLS 配置能被主动探测识别，抗探测请优先用 Reality；另外三个脚本的 systemd 单元均以 root 运行，未做 hardening
+- **sing-box 用的是第三方 fork**（`shtorm-7/sing-box-extended`，为了 MTPROXY 能力），需要额外信任该 fork 的发布链；对供应链敏感的场景改用官方 sing-box + `PROTOCOLS` 里去掉 `mt`
 
 ---
 

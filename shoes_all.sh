@@ -83,6 +83,10 @@ log()  { info "$*"; }
 hr()   { printf '%s\n' "------------------------------------------------------------"; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
+check_root() {
+  [ "$(id -u)" = "0" ] || die "请用 root 运行: sudo bash $0 ${1:-install}"
+}
+
 check_deps() {
   local pkgs=""
   have curl || pkgs="$pkgs curl"
@@ -155,13 +159,37 @@ ensure_cert() {
   [ -f "$CERT_FILE" ] && [ -f "$KEY_FILE" ] && { ok "复用已有证书: $CERT_FILE"; return; }
   [ -n "$user_cert" ] && [ "$CERT_FILE" != "$CERT_FILE_DEFAULT" ] && die "指定证书不存在: $CERT_FILE"
   info "生成自签证书 (CN=${DOMAIN}, 10 年有效期)..."
-  openssl req -new -newkey rsa:2048 -days 3650 -nodes -x509 \
-    -subj "/CN=${DOMAIN}" \
-    -addext "subjectAltName=DNS:${DOMAIN},DNS:*.${DOMAIN},IP:0.0.0.0" \
-    -keyout "$KEY_FILE" -out "$CERT_FILE" >/dev/null 2>&1 \
-    || die "证书生成失败"
+  local san="DNS:${DOMAIN},DNS:*.${DOMAIN},IP:0.0.0.0"
+  if openssl req -help 2>&1 | grep -q -- '-addext'; then
+    openssl req -new -newkey rsa:2048 -days 3650 -nodes -x509 \
+      -subj "/CN=${DOMAIN}" -addext "subjectAltName=${san}" \
+      -keyout "$KEY_FILE" -out "$CERT_FILE" >/dev/null 2>&1 \
+      || die "证书生成失败"
+  else
+    # 老版本 OpenSSL(<1.1.1, 如 CentOS 7) 没有 -addext, 用配置文件方式
+    local cnf; cnf=$(mktemp)
+    cat > "$cnf" <<EOF
+[req]
+distinguished_name=dn
+x509_extensions=v3
+prompt=no
+[dn]
+CN=${DOMAIN}
+[v3]
+subjectAltName=${san}
+EOF
+    openssl req -new -newkey rsa:2048 -days 3650 -nodes -x509 \
+      -config "$cnf" -keyout "$KEY_FILE" -out "$CERT_FILE" >/dev/null 2>&1
+    local rc=$?
+    rm -f "$cnf"
+    [ "$rc" = "0" ] || die "证书生成失败"
+  fi
   chmod 600 "$KEY_FILE"
   ok "证书已生成: $CERT_FILE"
+}
+
+need_cert() {
+  enabled hy2 || enabled tuic || enabled vless || enabled vmess || enabled trojan
 }
 
 # ---- 二进制安装 ----
@@ -351,7 +379,18 @@ write_config() {
   ok "配置已写入: ${CONF_FILE}"
   # 备份只保留最近 3 份
   ls -t "${CONF_FILE}".bak.* 2>/dev/null | tail -n +4 | xargs -r rm -f
-  "$BIN_PATH" check "$CONF_FILE" || { warn "配置校验失败!"; return 1; }
+  # 校验失败则回滚, 避免留下坏配置把服务弄挂
+  if ! "$BIN_PATH" check "$CONF_FILE" >/dev/null 2>&1; then
+    warn "配置校验失败, 输出详情:"
+    "$BIN_PATH" check "$CONF_FILE" 2>&1 | sed -n '1,10p' || true
+    local lastbak; lastbak=$(ls -t "${CONF_FILE}".bak.* 2>/dev/null | sed -n 1p || true)
+    if [ -n "$lastbak" ]; then
+      cp -f "$lastbak" "$CONF_FILE" && warn "已回滚到上一份有效配置: ${lastbak}"
+    else
+      rm -f "$CONF_FILE"; warn "无历史配置可回滚, 已删除无效配置"
+    fi
+    return 1
+  fi
   ok "配置校验通过"
 }
 
@@ -643,7 +682,7 @@ do_install() {
   check_selinux
   validate_plan
   load_or_init_creds
-  ensure_cert
+  if need_cert; then ensure_cert; else info "未启用 TLS 类协议, 跳过证书生成"; fi
   install_binary
   ensure_reality_keys
   write_config || die "配置写入失败"
@@ -716,7 +755,35 @@ cmd_uninstall() {
   ok "卸载完成"
 }
 
+usage() {
+  # 本地文件: 打印头部注释; curl|bash 时 $0 是 bash, 读不到 -> 用内置简版
+  if [ -r "$0" ] && sed -n '2,27p' "$0" 2>/dev/null | grep -q 'PROTOCOLS'; then
+    sed -n '2,27p' "$0"
+  else
+    cat <<'EOF'
+shoes_all.sh — shoes 全家桶一键部署 (hy2/tuic/ss/vless/vmess/trojan/reality)
+
+用法:
+  sudo bash shoes_all.sh [install|plan|status|info|logs [N]|update|uninstall]
+
+环境变量:
+  PROTOCOLS=hy2,tuic,ss,vless,vmess,trojan,reality   选择协议(逗号分隔, 默认全装)
+  HY2_PORT=443 TUIC_PORT=8443 SS_PORT=8388 VLESS_PORT=8989 VMESS_PORT=8990
+  TROJAN_PORT=8444 REALITY_PORT=8899
+  REALITY_DEST=www.microsoft.com:443   Reality 握手目标
+  DOMAIN=xxx.com                       SNI/证书域名
+  SHOES_TAG=v0.3.3                     锁定版本; 传 latest 取上游最新
+  MIRROR=https://ghfast.top/           GitHub 下载镜像前缀
+  CERT_FILE/KEY_FILE=...               使用已有证书
+  SERVER_ADDR=1.2.3.4                  手动指定对外 IP
+EOF
+  fi
+}
+
 main() {
+  case "${1:-install}" in
+    install|update|uninstall) check_root "${1:-install}" ;;&
+  esac
   case "${1:-install}" in
     install)    do_install ;;
     plan)       validate_plan ;;
@@ -726,7 +793,7 @@ main() {
     update)     cmd_update ;;
     uninstall)  cmd_uninstall ;;
     help|-h|--help)
-      sed -n '2,27p' "$0" ;;
+      usage ;;
     *) die "未知命令: $1 (可用: install/plan/status/info/logs/update/uninstall/help)" ;;
   esac
 }
