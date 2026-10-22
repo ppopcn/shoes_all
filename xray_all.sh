@@ -177,11 +177,12 @@ CN=${DOMAIN}
 [v3]
 subjectAltName=${san}
 EOF
-    openssl req -new -newkey rsa:2048 -days 3650 -nodes -x509 \
-      -config "$cnf" -keyout "$KEY_FILE" -out "$CERT_FILE" >/dev/null 2>&1
-    local rc=$?
+    if ! openssl req -new -newkey rsa:2048 -days 3650 -nodes -x509 \
+         -config "$cnf" -keyout "$KEY_FILE" -out "$CERT_FILE" >/dev/null 2>&1; then
+      rm -f "$cnf" "$KEY_FILE" "$CERT_FILE"
+      die "证书生成失败 (老版 OpenSSL 分支)"
+    fi
     rm -f "$cnf"
-    [ "$rc" = "0" ] || die "证书生成失败"
   fi
   chmod 600 "$KEY_FILE"
   ok "证书已生成: $CERT_FILE"
@@ -269,6 +270,23 @@ ensure_reality_keys() {
 }
 
 enabled() { echo ",${PROTOCOLS}," | grep -q ",$1,"; }
+
+normalize_protocols() {
+  # 逐项校验 + 去重, 非法值直接报错(sing-box 同款行为)
+  local out="" p
+  for p in $(printf '%s' "$PROTOCOLS" | tr ',' ' '); do
+    [ -n "$p" ] || continue
+    case "$p" in
+      reality|vless|vmess|trojan|ss) out="$out,$p" ;;
+      *) die "未知协议: ${p} (可用: reality vless vmess trojan ss)" ;;
+    esac
+  done
+  out=$(printf '%s' "${out#,}" | tr ',' '\n' | awk '!seen[$0]++' | tr '\n' ',' )
+  out="${out%,}"
+  [ -n "$out" ] || die "PROTOCOLS 解析结果为空 (可用: reality vless vmess trojan ss)"
+  PROTOCOLS="$out"
+}
+
 
 # ---- 配置渲染 (单文件 JSON, 多入站并存) ----
 write_config() {
@@ -410,9 +428,11 @@ EOF
   chmod 600 "$CONF_FILE"
   ok "配置已写入: ${CONF_FILE}"
   # 配置自检: 失败则回滚, 避免留下坏配置把服务弄挂
-  if ! "$BIN_PATH" run -test -c "$CONF_FILE" >/dev/null 2>&1; then
+  # run -test 是新写法, 只有旧版(用户手动 XRAY_TAG 钉老版本)才认 -test
+  if ! "$BIN_PATH" run -test -c "$CONF_FILE" >/dev/null 2>&1 \
+     && ! "$BIN_PATH" -test -c "$CONF_FILE" >/dev/null 2>&1; then
     warn "配置校验失败, 输出详情:"
-    "$BIN_PATH" run -test -c "$CONF_FILE" 2>&1 | sed -n '1,10p' || true
+    { "$BIN_PATH" run -test -c "$CONF_FILE" 2>&1 || "$BIN_PATH" -test -c "$CONF_FILE" 2>&1; } | sed -n '1,10p' || true
     local lastbak; lastbak=$(ls -t "${CONF_FILE}".bak.* 2>/dev/null | sed -n 1p || true)
     if [ -n "$lastbak" ]; then
       cp -f "$lastbak" "$CONF_FILE" && warn "已回滚到上一份有效配置: ${lastbak}"
@@ -666,7 +686,7 @@ validate_plan() {
   enabled vmess   && ports="$ports $VMESS_PORT" || true
   enabled trojan  && ports="$ports $TROJAN_PORT" || true
   enabled ss      && ports="$ports $SS_PORT" || true
-  dup=$(echo "$ports" | tr ' ' '\n' | grep -v '^$' | sort | uniq -d)
+  dup=$(printf '%s' "$ports" | tr ' ' '\n' | sed '/^$/d' | sort | uniq -d || true)
   if [ -n "$dup" ]; then die "已启用协议存在重复端口, 请调整: $dup"; fi
   ok "端口计划: reality=${REALITY_PORT} vless=${VLESS_PORT} vmess=${VMESS_PORT} trojan=${TROJAN_PORT} ss=${SS_PORT} (仅列出, 未启用的不生效)"
 }
@@ -799,6 +819,7 @@ EOF
 }
 
 main() {
+  normalize_protocols
   case "${1:-install}" in
     install|update|uninstall) check_root "${1:-install}" ;;&
   esac

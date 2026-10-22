@@ -178,11 +178,12 @@ CN=${DOMAIN}
 [v3]
 subjectAltName=${san}
 EOF
-    openssl req -new -newkey rsa:2048 -days 3650 -nodes -x509 \
-      -config "$cnf" -keyout "$KEY_FILE" -out "$CERT_FILE" >/dev/null 2>&1
-    local rc=$?
+    if ! openssl req -new -newkey rsa:2048 -days 3650 -nodes -x509 \
+         -config "$cnf" -keyout "$KEY_FILE" -out "$CERT_FILE" >/dev/null 2>&1; then
+      rm -f "$cnf" "$KEY_FILE" "$CERT_FILE"
+      die "证书生成失败 (老版 OpenSSL 分支)"
+    fi
     rm -f "$cnf"
-    [ "$rc" = "0" ] || die "证书生成失败"
   fi
   chmod 600 "$KEY_FILE"
   ok "证书已生成: $CERT_FILE"
@@ -216,7 +217,7 @@ install_binary() {
   local tag; tag=$(resolve_tag)
   if [ -x "$BIN_PATH" ]; then
     local cur; cur=$("$BIN_PATH" --version 2>/dev/null | head -1 || true)
-    if echo "$cur" | grep -q "$tag"; then ok "已安装 ${cur}, 跳过下载"; return; fi
+    if echo "$cur" | grep -q "${tag#v}"; then ok "已安装 ${cur}, 跳过下载"; return; fi
     warn "现有版本: ${cur:-未知}, 准备升级到 ${tag}"
   fi
   local asset="shoes-$(detect_arch_asset)"
@@ -368,6 +369,23 @@ EOF
 }
 
 enabled() { echo ",${PROTOCOLS}," | grep -q ",$1,"; }
+
+normalize_protocols() {
+  # 逐项校验 + 去重, 非法值直接报错(sing-box 同款行为)
+  local out="" p
+  for p in $(printf '%s' "$PROTOCOLS" | tr ',' ' '); do
+    [ -n "$p" ] || continue
+    case "$p" in
+      hy2|tuic|ss|vless|vmess|trojan|reality) out="$out,$p" ;;
+      *) die "未知协议: ${p} (可用: hy2 tuic ss vless vmess trojan reality)" ;;
+    esac
+  done
+  out=$(printf '%s' "${out#,}" | tr ',' '\n' | awk '!seen[$0]++' | tr '\n' ',' )
+  out="${out%,}"
+  [ -n "$out" ] || die "PROTOCOLS 解析结果为空 (可用: hy2 tuic ss vless vmess trojan reality)"
+  PROTOCOLS="$out"
+}
+
 
 write_config() {
   if [ -f "$CONF_FILE" ]; then
@@ -781,6 +799,7 @@ EOF
 }
 
 main() {
+  normalize_protocols
   case "${1:-install}" in
     install|update|uninstall) check_root "${1:-install}" ;;&
   esac

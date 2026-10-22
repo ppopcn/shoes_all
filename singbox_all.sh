@@ -113,9 +113,10 @@ SECRET=""
 USER_DOMAIN="${DOMAIN:-}"
 
 # ================================================================ 公共层 ====
-# 本文件是 build.sh 拼接进各协议脚本的公共骨架, 不单独执行, 也不带 shebang。
+# 单文件脚本: 公共层(平台探测/下载/服务/防火墙/端口)与协议段合并在本文件内,
+# 直接执行即可; 早期由 build.sh 拼接多协议脚本的方式已废弃, 不要再依赖。
 #
-# 调用方(协议段)必须先定义:
+# 协议段(本文件后半部分)依赖以下变量先行定义:
 #   SERVICE_NAME   systemd / OpenRC 单元名, 如 singbox-tuic
 #   SERVICE_DESC   单元描述
 #   SHORT_NAME     协议短名, 用于本地命令 singbox-<short>
@@ -1056,89 +1057,6 @@ existing_ports() {
     | grep -oE '[0-9]+'
 }
 
-# 校验并归一化所有声明端口; PORT_SPECS = ("PORT:tcp" ...)
-# 优先级: 显式环境变量 > 已有配置 > PORT_DEFAULTS 默认值 > port_defaults_hook 推导
-resolve_ports() {
-  local spec name proto p idx=0 changed=0 assigned="" newp
-  local existing=() line
-
-  while IFS= read -r line; do
-    if [[ -n "$line" ]]; then
-      existing+=("$line")
-    fi
-  done < <(existing_ports)
-
-  # 1) 取值优先级: 显式环境变量 > 已有配置 > PORT_DEFAULTS 默认值
-  #    这里允许暂时为空, 留给 port_defaults_hook 推导(如 VMess 取 VLESS+1)
-  for spec in "${PORT_SPECS[@]}"; do
-    name="${spec%%:*}"; proto="${spec#*:}"
-    p="${!name:-}"
-
-    if [[ -z "$p" && -n "${existing[$idx]:-}" ]]; then
-      p="${existing[$idx]}"
-      info "沿用已有配置端口 ${name}=${p}"
-    fi
-    [[ -n "$p" ]] || p="$(port_default_of "$name")"
-    if [[ -n "$p" ]]; then
-      printf -v "$name" '%s' "$p"
-    fi
-    idx=$((idx + 1))
-  done
-
-  # 2) 协议段补默认端口(如 VMess 取 VLESS+1)
-  if declare -F port_defaults_hook >/dev/null; then
-    port_defaults_hook
-  fi
-
-  # 3) 统一校验: 非空 / 数字 / 范围
-  for spec in "${PORT_SPECS[@]}"; do
-    name="${spec%%:*}"; proto="${spec#*:}"
-    p="${!name:-}"
-    [[ -n "$p" ]] || die "未设置 ${name}, 且没有可用默认值(可用 ${name}=<端口> 指定)"
-    [[ "$p" =~ ^[0-9]+$ ]] || die "${name} 必须是数字: ${p}"
-    p="$((10#$p))"          # 10# 避免 0808 被当成八进制
-    ((p >= 1 && p <= 65535)) || die "${name} 超出范围 (1-65535): ${p}"
-    printf -v "$name" '%s' "$p"
-  done
-
-  # 先做一次交叉校验: 显式把两个协议指到同一端口属于配置错误, 应直接报错
-  if declare -F port_validate_hook >/dev/null; then
-    port_validate_hook
-  fi
-
-  # 冲突处理: 询问 -> 超时/非交互则自动挑
-  for spec in "${PORT_SPECS[@]}"; do
-    name="${spec%%:*}"; proto="${spec#*:}"
-    p="${!name}"
-
-    if port_busy "$p" "$proto" || [[ " $assigned " == *" $p " ]]; then
-      if port_busy "$p" "$proto"; then
-        newp="$(ask_port "$name" "$p" "$proto")" || newp=""
-      else
-        newp=""
-      fi
-      if [[ -z "$newp" ]]; then
-        newp="$(pick_free_port "$proto" $assigned)" \
-          || die "端口 ${p}/${proto} 无法使用, 且自动挑选失败, 请显式指定 ${name}=<端口>"
-        warn "端口 ${p}/${proto} 不可用, 自动改用 ${newp}/${proto}"
-      else
-        ok "端口已改为 ${newp}/${proto}"
-      fi
-      printf -v "$name" '%s' "$newp"
-      changed=1
-    fi
-
-    assigned+=" ${!name}"
-  done
-
-  if declare -F port_validate_hook >/dev/null; then
-    port_validate_hook
-  fi
-  ok "端口: $(port_summary)"
-  ((changed)) && warn "端口与原计划不同, 云服务器记得在安全组放行新端口"
-  return 0
-}
-
 port_summary() {
   local spec name proto out=""
   for spec in "${PORT_SPECS[@]}"; do
@@ -1333,13 +1251,6 @@ print_manage_block() {
   echo
 }
 
-# ---------------------------------------------------------------- 信息查询 --
-cmd_info() {
-  [[ -f "$CONFIG_FILE" ]] || die "未找到配置 ${CONFIG_FILE}, 请先运行部署"
-  load_credentials
-  print_summary "$(public_addr)"
-}
-
 # ------------------------------------------------------------------ 卸载 ---
 cmd_uninstall() {
   info "开始卸载 ${SERVICE_NAME}..."
@@ -1363,9 +1274,15 @@ cmd_uninstall() {
     warn "保留配置: ${CONFIG_FILE}"
   else
     rm -f "$CONFIG_FILE"
-    # reality.json 含 Reality 私钥, 证书含私钥, 一并清理
-    rm -f "${CONFIG_DIR}/reality.json" "${CERT_FILE}" "${KEY_FILE}"
-    ok "已删除配置 (含 reality.json 与证书)"
+    # reality.json 含 Reality 私钥, 一并清理
+    rm -f "${CONFIG_DIR}/reality.json"
+    # 只删脚本自己生成的自签证书(默认路径), 避免误删用户 CERT_FILE/KEY_FILE 指定的证书
+    if [[ "${CERT_FILE}" == "${CONFIG_DIR}/cert.pem" && "${KEY_FILE}" == "${CONFIG_DIR}/key.pem" ]]; then
+      rm -f "${CONFIG_DIR}/cert.pem" "${CONFIG_DIR}/key.pem"
+      ok "已删除配置 (含 reality.json 与自签证书)"
+    else
+      warn "已删除配置; 保留用户指定证书: ${CERT_FILE} ${KEY_FILE}"
+    fi
   fi
 
   rm -f "${INSTALL_DIR}/singbox-${SHORT_NAME}"
@@ -1380,59 +1297,6 @@ cmd_uninstall() {
   fi
   echo
   ok "卸载完成。若不再需要, 可手动清理 ${CONFIG_DIR}"
-}
-
-# ------------------------------------------------------------------ 主流程 --
-do_install() {
-  check_os
-  check_deps
-
-  # 先停掉同名服务, 否则重装时自己占着的端口会被判定为冲突
-  if service_is_active 2>/dev/null; then
-    info "检测到 ${SERVICE_NAME} 正在运行, 先停止..."
-    service_stop
-  fi
-
-  resolve_ports
-
-  if ((NEED_DOMAIN)); then
-    # 重装时沿用旧 SNI: FakeTLS / 证书域名变了, 老客户端会直接连不上
-    [[ -n "$DOMAIN" ]] || DOMAIN="$(config_pick inbounds.0.tls.server_name)"
-    [[ -n "$DOMAIN" ]] || DOMAIN="${DEFAULT_DOMAINS[RANDOM % ${#DEFAULT_DOMAINS[@]}]}"
-    ok "域名 / SNI: ${DOMAIN}"
-  fi
-
-  install_binary
-
-  if ((NEED_CERT)); then
-    ensure_cert "$DOMAIN"
-  fi
-
-  prepare_secrets
-  write_config
-  write_service
-  open_firewall
-  start_service
-  install_self
-  print_summary "$(public_addr)"
-}
-
-main() {
-  local action="${1:-install}"
-
-  case "$action" in
-    -h|--help|help) usage; return 0 ;;
-  esac
-
-  check_root
-
-  case "$action" in
-    install)          do_install ;;
-    info)             check_os; cmd_info ;;
-    uninstall|remove) check_os; cmd_uninstall ;;
-    logs)             check_os; service_logs "${2:-50}" ;;
-    *) die "未知命令: ${action} (可用: install / info / uninstall / logs / help)" ;;
-  esac
 }
 
 # ------------------------------------------------------------ 计划与工具 ----
