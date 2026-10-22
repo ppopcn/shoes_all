@@ -108,11 +108,13 @@ sudo env PROTOCOLS=vless bash shoes_all.sh          # 已 sudo 时
 
 | 变量            | 适用           | 说明                                       |
 | ------------- | ------------ | ---------------------------------------- |
-| `SHOES_TAG`   | shoes        | 锁定内核版本，如 `v0.3.3`                        |
-| `SINGBOX_TAG` | sing-box     | 锁定内核版本                                   |
-| `XRAY_TAG`    | xray         | 锁定内核版本（默认自动取 GitHub 最新 release）          |
+| `SHOES_TAG`   | shoes        | 默认 `v0.3.3`（已验证）；传 `latest` 联网取最新 release            |
+| `SINGBOX_TAG` | sing-box     | 默认 `v1.14.1-extended-2.7.2`（已验证）；传 `latest` 取最新（API 失败报错） |
+| `XRAY_TAG`    | xray         | 默认 `v26.3.27`（已验证）；传 `latest` 取最新（API 失败回退默认）      |
 | `FORCE_BIN=1` | sing-box     | 强制重新下载二进制                                |
 | `<NAME>_V`    | shoes / xray | 显式覆盖凭据，如 `HY2_PASSWORD_V=xxx`（重装想固定密码时用） |
+
+> 三个脚本统一策略：**默认锁死脚本内已验证的版本**（部署结果可复现），需要尝鲜时显式 `XXX_TAG=latest`。
 
 ### 组合示例
 

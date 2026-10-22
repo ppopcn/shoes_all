@@ -23,7 +23,7 @@
 #   REALITY_PORT=443 VLESS_PORT=8989 VMESS_PORT=8990 TROJAN_PORT=8444 SS_PORT=8388
 #   REALITY_DEST=www.microsoft.com:443   Reality 握手目标(借用其 TLS 指纹)
 #   DOMAIN=xxx.com                  SNI/证书域名(默认随机伪装域名)
-#   XRAY_TAG=v25.3.6                锁定版本(默认自动取最新 release)
+#   XRAY_TAG=v26.3.27               锁定版本(默认即该版本; 传 latest 则联网取最新 release)
 #   MIRROR=https://ghfast.top/      GitHub 下载镜像前缀
 #   CERT_FILE/KEY_FILE=...          使用已有证书
 #   SERVER_ADDR=1.2.3.4             手动指定对外 IP
@@ -173,16 +173,22 @@ detect_arch_asset() {
   esac
 }
 
+XRAY_TAG_DEFAULT="v26.3.27"
+
 resolve_tag() {
-  # 显式指定 XRAY_TAG 则用之; 否则取 GitHub 最新 release tag, 失败回退到已知可用版本
-  if [ -n "${XRAY_TAG:-}" ]; then echo "$XRAY_TAG"; return; fi
-  curl -fsSL --max-time 10 "https://api.github.com/repos/XTLS/Xray-core/releases/latest" 2>/dev/null \
-    | grep -m1 '"tag_name"' | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/' || true
+  # 默认用锁定的已验证版本; XRAY_TAG=latest 时才联网取最新 release
+  local tag="${XRAY_TAG:-$XRAY_TAG_DEFAULT}"
+  if [ "$tag" != "latest" ]; then printf '%s' "$tag"; return; fi
+  local t
+  t=$(curl -fsSL --max-time 10 "https://api.github.com/repos/XTLS/Xray-core/releases/latest" 2>/dev/null \
+      | grep -m1 '"tag_name"' | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/' || true)
+  [ -n "$t" ] || { warn "无法解析最新版本(网络受限?), 回退到 ${XRAY_TAG_DEFAULT}"; t="$XRAY_TAG_DEFAULT"; }
+  printf '%s' "$t"
 }
 
 install_binary() {
   local tag; tag=$(resolve_tag)
-  [ -n "$tag" ] || tag="v25.3.6"   # API 不通时的兜底版本
+  [ -n "$tag" ] || tag="$XRAY_TAG_DEFAULT"
   if [ -x "$BIN_PATH" ]; then
     local cur; cur=$("$BIN_PATH" version 2>/dev/null | head -1 || true)
     if echo "$cur" | grep -q "$tag"; then ok "已安装 ${cur:-未知}, 跳过下载"; return; fi
