@@ -210,8 +210,10 @@ resolve_tag() {
   local tag="${XRAY_TAG:-${1:-$XRAY_TAG_DEFAULT}}"
   if [ "$tag" != "latest" ]; then printf '%s' "$tag"; return; fi
   local t
-  t=$(curl -fsSL --max-time 10 "https://api.github.com/repos/XTLS/Xray-core/releases/latest" 2>/dev/null \
-      | grep -m1 '"tag_name"' | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/' || true)
+  # 取 releases 列表第 1 条, 而不是 /releases/latest —— Xray 从 v26.6 起把每个版本都标了
+  # prerelease, /latest 会永远返回最后一个非 prerelease 的 v26.3.27, 导致 update 升不动
+  t=$(curl -fsSL --max-time 10 "https://api.github.com/repos/XTLS/Xray-core/releases?per_page=5" 2>/dev/null \
+      | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | sed -n '1s/.*"\([^"]*\)"$/\1/p' || true)
   [ -n "$t" ] || { warn "无法解析最新版本(网络受限?), 回退到 ${XRAY_TAG_DEFAULT}"; t="$XRAY_TAG_DEFAULT"; }
   printf '%s' "$t"
 }
@@ -533,9 +535,13 @@ start_service() {
   info "启动服务..."
   if [ "$INIT_SYS" = "systemd" ]; then
     systemctl enable "$SERVICE_NAME" >/dev/null 2>&1
-    systemctl restart "$SERVICE_NAME"
+    # restart 失败时不直接退出(否则 set -e 抢先终止, 日志和提示都看不到)
+    systemctl restart "$SERVICE_NAME" || true
     sleep 1
-    systemctl is-active --quiet "$SERVICE_NAME" || { journalctl -u "$SERVICE_NAME" -n 30 --no-pager; die "服务启动失败"; }
+    systemctl is-active --quiet "$SERVICE_NAME" || {
+      journalctl -u "$SERVICE_NAME" -n 30 --no-pager 2>/dev/null || true
+      die "服务启动失败。常见原因: ① 未先 install(服务单元不存在); ② 端口被占用(三个全家桶端口重叠, 同机只能跑一个, 用 ss -lntup 确认)"
+    }
     ok "服务运行中: ${SERVICE_NAME}"
   else
     rc-update add "$SERVICE_NAME" default >/dev/null 2>&1 || true

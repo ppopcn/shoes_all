@@ -203,12 +203,26 @@ sudo SINGBOX_TAG=v1.14.3-extended-2.7.3 bash singbox_all.sh install
 
 | 脚本       | 安装锁定默认                     | update 默认      | latest 行为                                    |
 | -------- | ------------------------ | --------------- | -------------------------------------------- |
-| shoes    | `v0.3.3`                 | 上游最新            | 查 GitHub API，失败回退锁定版本并告警                     |
-| sing-box | `v1.14.1-extended-2.7.2` | （无 update 子命令）  | 查 GitHub API，失败直接报错（可 `SINGBOX_TAG=v...` 指定） |
-| xray     | `v26.3.27`               | 上游最新            | 查 GitHub API，失败回退锁定版本并告警                     |
+| shoes    | `v0.3.3`                 | 上游最新            | 取 releases 列表第 1 条，失败回退锁定版本并告警                |
+| sing-box | `v1.14.1-extended-2.7.2` | （无 update 子命令）  | 取 releases 列表第 1 条，失败直接报错（可 `SINGBOX_TAG=v...` 指定） |
+| xray     | `v26.3.27`               | 上游最新            | 取 releases 列表第 1 条，失败回退锁定版本并告警                |
 
 
 > 设计意图：**install 求稳**（新机器装出来的永远是验证过的版本）、**update 求新**（日常一条命令追上游）、**钉版本求可控**（`XXX_TAG=vX.Y.Z` 显式覆盖两者）。显式设置的 `XXX_TAG` 优先级最高，install 和 update 都认。
+
+### 为什么 latest 不用 `/releases/latest`
+
+GitHub 的 `/releases/latest` 只返回**最后一个非 prerelease** 的版本。Xray-core 从 v26.6 起把每个 release 都标了 `prerelease=true`，于是 `/latest` 永远停在 v26.3.27——`update` 看起来执行成功，实际只是用锁定版本重装了一遍。
+
+所以脚本改成读 `releases?per_page=5` 取列表第一条（最新的那个，不区分 prerelease）：
+
+```bash
+# 实测：上游 /releases/latest 返回 v26.3.27，但 releases 列表第一条是 v26.10.21
+curl -fsSL "https://api.github.com/repos/XTLS/Xray-core/releases?per_page=5" \
+  | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | sed -n '1s/.*"\([^"]*\)"$/\1/p'
+```
+
+含义是「上游发布的最新版」而非「上游认为的稳定版」。想要保守就钉版本，别指望 latest 帮你筛稳定版。
 
 ---
 
@@ -238,16 +252,16 @@ sudo SINGBOX_TAG=v1.14.3-extended-2.7.3 bash singbox_all.sh install
 - 架构：x86_64 / aarch64（shoes 用官方 musl 静态包，glibc 发行版同样可用；无 32 位 ARM 包）
 - RHEL 系若 SELinux 为 Enforcing，脚本会提示；服务起不来时先看 `/var/log/audit/audit.log`
 - 云服务器安全组需在控制台单独放行，脚本管不到
-- **实测范围**：主要验证在 Debian 13（systemd）上完成；RHEL / Alpine 分支做了静态审查与单元渲染校验，未逐一实机跑通，用前建议先 `plan` 看一眼端口计划
+- **实测范围**：Debian 12 (bookworm) 与 Debian 13 (trixie) 上三套脚本全部实机跑通（含协议回环与升级路径）；RHEL / Alpine 分支做了静态审查与单元渲染校验，未逐一实机跑通，用前建议先 `plan` 看一眼端口计划
 - sing-box 脚本重装复用旧凭据依赖 `python3`（解析 JSON）；python3 不可用时脚本只打警告，重装会重新生成凭据导致客户端失效——Alpine/RHEL 最小系统请先装 python3
 
 ---
 
 ## 实测记录
 
-环境：Debian GNU/Linux 12 (bookworm) / x86_64 / OpenSSL 3.0.22。
+环境：Debian GNU/Linux 12 (bookworm) 与 13 (trixie) / x86_64 各一台。
 
-方法：服务端装全家桶后，客户端在**同一台机器的 127.0.0.1** 上回环直连各入站（xray 26.3.27 充当 TCP 系客户端、sing-box 充当 QUIC 系客户端），逐协议独立建连并请求 `https://www.gstatic.com/generate_204`，返回 204 才记为通过。
+方法：服务端装全家桶后，客户端在**同一台机器的 127.0.0.1** 上回环直连各入站（xray 充当 TCP 系客户端、sing-box 充当 QUIC 系客户端），逐协议独立建连并请求 `https://www.gstatic.com/generate_204`，返回 204 才记为通过。**三个脚本单独测，每个测完立即 uninstall 再装下一个**（端口重叠，同机不能并存）。
 
 | 脚本                | 通过 / 总数 | 明细                                                       |
 | ----------------- | ------- | -------------------------------------------------------- |
@@ -255,10 +269,19 @@ sudo SINGBOX_TAG=v1.14.3-extended-2.7.3 bash singbox_all.sh install
 | `singbox_all.sh`  | 7 / 7   | ss、vless、vmess、trojan、reality、hy2、tuic 全通                 |
 | `xray_all.sh`     | 5 / 5   | ss、vless(WS)、vmess(WS)、trojan、reality 全通                  |
 
+升级路径实测（Debian 13）：
+
+| 场景 | 结果 |
+| --- | --- |
+| `XRAY_TAG=v26.9.8 install` → `update` | v26.9.8 → **v26.10.21**，服务重启正常，5 协议回归通过 |
+| `SHOES_TAG=v0.2.7 install` → `update` | v0.2.7 → **v0.3.3**，服务重启正常，5 协议回归通过（v0.2.7 的 `-d` 校验兜底同时验证） |
+| `SINGBOX_TAG=latest install` | 解析到 **v1.14.3-extended-2.7.3**（新于锁定的 2.7.2），SHA256 校验通过，7 协议回归通过 |
+| `XRAY_TAG=v26.3.27 update` | 从 v26.10.21 降回 v26.3.27，钉版本生效 |
+| 重复 `install` | 打印「已安装 x.y.z, 跳过下载」，不重复拉二进制 |
+
 补充验证：
 
 - **Shadowsocks UDP 中转**：xray 版实测通过（`dokodemo-door` → SS UDP → `8.8.8.8:53` 解析成功）；shoes 版内核不支持，sing-box 版监听 `8388/udp`。
-- **二次 install**：三个脚本都会打印「已安装 x.y.z, 跳过下载」，不重复拉二进制。
 - **卸载**：服务单元、配置目录、二进制均清除；用户用 `CERT_FILE` 指定的证书会被保留；防火墙规则保留但给出清理命令。
 - **未覆盖**：MTPROXY 的端到端登录需要真实 Telegram 账号，本轮只验证了入站工作正常（连接被接住并走伪装逻辑）与配置合法性；hy2/tuic 的 QUIC 回环在 sing-box 版做过，shoes 版因缺客户端未做。
 
@@ -280,6 +303,9 @@ sudo SINGBOX_TAG=v1.14.3-extended-2.7.3 bash singbox_all.sh install
 | sing-box 的 443 端口「连上了但没数据」                                                              | MTPROXY 用 `domain_fronting_port=443` + secret 尾部域名做伪装，非 MTPROXY 流量会被转发到 `www.cloudflare.com:443`（返回 TLS Alert）。这是设计行为，不是串线 | 检查 secret 是否用完整 `ee...` 串、客户端是否开了 MTPROXY 类型；抓包会看到目标域名是 cloudflare |
 | shoes 的 Shadowsocks 没有 UDP 中转                                                              | shoes 内核的 shadowsocks 入站只支持 `type/cipher/password`，无 UDP 配置项（见上游 CONFIG.md）                                              | 需要 SS UDP（游戏、DNS）就用 sing-box 或 xray 版；shoes 版只能代理 TCP            |
 | 卸载后 `ufw status` 里端口还在放行                                                                | 卸载**不会自动删防火墙规则**（避免误删你自建的规则），只打印可复制的删除命令                                                                                     | 按卸载输出的 `ufw delete allow <port>` 逐条清；换内核前先清一次能避免规则越积越多      |
+| 钉老版本 shoes（v0.2.x）装不上，报 `PathNotFound: /root/check`                                        | 老版本没有 `check` 子命令，把 "check" 当成了配置文件路径                                                                                     | 已改为 `check` 失败时用 `shoes -d`（dry-run）兜底校验，老版本也能装                |
+| 同机装第二个全家桶后服务起不来，日志里没有明显错误                                                          | 三个脚本的默认端口是同一套（8388/8444/8989/8990…），同机只能跑一个                                                                                | 先 `uninstall` 另一个；脚本现在会在启动失败时直接提示端口占用                        |
+| `update` 显示"升级完成"但版本没变                                                                      | 用 `/releases/latest` 取版，上游把新版都标成 prerelease 时它会停在旧版（Xray 从 v26.6 起如此）                                                            | 已改为读 releases 列表第一条；见下方「为什么 latest 不用 /releases/latest」        |
 
 ---
 

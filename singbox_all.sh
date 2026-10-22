@@ -462,9 +462,10 @@ resolve_release() {
   local arch="$1" tag="$SINGBOX_TAG" ver base name url digest="" json
 
   if [[ "$tag" == "latest" ]]; then
-    json="$(fetch_stdout "${SINGBOX_API}/latest")" || json=""
+    # 取 releases 列表第 1 条而非 /latest: 上游若把新版标记为 prerelease, /latest 会停在旧版上
+    json="$(fetch_stdout "${SINGBOX_API}?per_page=5")" || json=""
     tag="$(printf '%s' "$json" | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' \
-      | head -n1 | sed -e 's/.*"\([^"]*\)"$/\1/')"
+      | sed -n '1s/.*"\([^"]*\)"$/\1/p')"
     [[ -n "$tag" ]] || die "无法解析最新版本(网络受限?), 可用 SINGBOX_TAG=v... 指定"
   fi
 
@@ -1165,7 +1166,7 @@ start_service() {
   fi
 
   info "启动服务..."
-  service_restart || { service_logs 50 >&2; die "服务启动失败"; }
+  service_restart || { service_logs 50 >&2; die "服务启动失败。常见原因: ① 未先 install(服务单元不存在); ② 端口被占用(三个全家桶端口重叠, 同机只能跑一个, 用 ss -lntup 确认)"; }
   sleep 2
 
   # 双栈监听个别网络环境下起不来, 回退 IPv4
@@ -1189,7 +1190,7 @@ start_service() {
       bad=1
     fi
   done
-  ((bad)) && { service_logs 30 >&2; die "服务端口未全部就绪"; }
+  ((bad)) && { service_logs 30 >&2; die "服务端口未全部就绪(端口被占用? 同机只能跑一个全家桶)"; }
 
   ok "服务运行中, $(port_summary) 已监听"
 }

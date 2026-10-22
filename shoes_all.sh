@@ -208,8 +208,10 @@ resolve_tag() {
   local tag="${SHOES_TAG:-${1:-$SHOES_TAG_DEFAULT}}"
   if [ "$tag" != "latest" ]; then printf '%s' "$tag"; return; fi
   local t
-  t=$(curl -fsSL --max-time 10 "https://api.github.com/repos/cfal/shoes/releases/latest" 2>/dev/null \
-      | grep -m1 '"tag_name"' | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/' || true)
+  # 取 releases 列表第 1 条, 而不是 /releases/latest —— 上游若把新版标记为 prerelease
+  # (Xray 从 v26.6 起全部如此), /latest 会永远停在最后一个非 prerelease 版本上, 导致 update 升不动
+  t=$(curl -fsSL --max-time 10 "https://api.github.com/repos/cfal/shoes/releases?per_page=5" 2>/dev/null \
+      | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | sed -n '1s/.*"\([^"]*\)"$/\1/p' || true)
   [ -n "$t" ] || { warn "无法解析最新版本(网络受限?), 回退到 ${SHOES_TAG_DEFAULT}"; t="$SHOES_TAG_DEFAULT"; }
   printf '%s' "$t"
 }
@@ -232,7 +234,9 @@ install_binary() {
   [ -n "$b" ] || die "压缩包内未找到 shoes 二进制"
   install -m 755 "$b" "${BIN_PATH}.new" && mv -f "${BIN_PATH}.new" "$BIN_PATH"
   rm -rf "$tmp"
-  ok "已安装: $( { "$BIN_PATH" --version 2>&1 || true; } | sed -n 1p )"
+  # 老版本 shoes(<=0.2.7) 不认 --version, 会往 stderr 吐 usage, 故只取 stdout 并兜底到 tag
+  local nver; nver=$( { "$BIN_PATH" --version 2>/dev/null || true; } | sed -n 1p )
+  ok "已安装: ${nver:-$tag}"
 }
 
 # ---- Reality 密钥 (依赖 shoes 二进制, 需在 install_binary 之后调用) ----
@@ -399,9 +403,16 @@ write_config() {
   # 备份只保留最近 3 份
   ls -t "${CONF_FILE}".bak.* 2>/dev/null | tail -n +4 | xargs -r rm -f
   # 校验失败则回滚, 避免留下坏配置把服务弄挂
-  if ! "$BIN_PATH" check "$CONF_FILE" >/dev/null 2>&1; then
+  # 0.3.x 有 check 子命令; 0.2.x 没有它(会把 "check" 当成配置文件路径 panic), 用 -d(dry-run) 兜底
+  local vok=0 vout=""
+  if vout=$("$BIN_PATH" check "$CONF_FILE" 2>&1); then
+    vok=1
+  elif vout=$("$BIN_PATH" -d "$CONF_FILE" 2>&1); then
+    vok=1
+  fi
+  if [ "$vok" = "0" ]; then
     warn "配置校验失败, 输出详情:"
-    "$BIN_PATH" check "$CONF_FILE" 2>&1 | sed -n '1,10p' || true
+    printf '%s\n' "$vout" | sed -n '1,10p' || true
     local lastbak; lastbak=$(ls -t "${CONF_FILE}".bak.* 2>/dev/null | sed -n 1p || true)
     if [ -n "$lastbak" ]; then
       cp -f "$lastbak" "$CONF_FILE" && warn "已回滚到上一份有效配置: ${lastbak}"
@@ -503,9 +514,13 @@ start_service() {
   info "启动服务..."
   if [ "$INIT_SYS" = "systemd" ]; then
     systemctl enable "$SERVICE_NAME" >/dev/null 2>&1
-    systemctl restart "$SERVICE_NAME"
+    # restart 失败时不直接退出(否则 set -e 抢先终止, 日志和提示都看不到)
+    systemctl restart "$SERVICE_NAME" || true
     sleep 1
-    systemctl is-active --quiet "$SERVICE_NAME" || { journalctl -u "$SERVICE_NAME" -n 30 --no-pager; die "服务启动失败"; }
+    systemctl is-active --quiet "$SERVICE_NAME" || {
+      journalctl -u "$SERVICE_NAME" -n 30 --no-pager 2>/dev/null || true
+      die "服务启动失败。常见原因: ① 未先 install(服务单元不存在); ② 端口被占用(三个全家桶端口重叠, 同机只能跑一个, 用 ss -lntup 确认)"
+    }
     ok "服务运行中: ${SERVICE_NAME}"
   else
     rc-update add "$SERVICE_NAME" default >/dev/null 2>&1 || true
@@ -715,7 +730,8 @@ do_install() {
 cmd_update() {
   # update 默认拉上游最新版; SHOES_TAG=钉版本 时退化为按版本修复
   detect_platform; install_binary latest; start_service; install_self
-  log "升级完成: $( { "$BIN_PATH" --version 2>&1 || true; } | sed -n 1p )"
+  local nver; nver=$( { "$BIN_PATH" --version 2>/dev/null || true; } | sed -n 1p )
+  log "升级完成: ${nver:-未知版本}"
 }
 
 cmd_status() {
