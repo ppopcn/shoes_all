@@ -2,10 +2,10 @@
 
 三台「单进程 · 单配置 · 全协议」代理服务端一键部署脚本，都是**一个脚本装完、跑一个进程、出一张凭据表**。
 
-| 脚本                                 | 内核                                                                          | 协议数 | 适用                    |
-| ---------------------------------- | --------------------------------------------------------------------------- | --- | --------------------- |
-| [`shoes_all.sh`](shoes_all.sh)     | [cfal/shoes](https://github.com/cfal/shoes)（Rust，静态 musl 二进制）               | 7   | 轻量，无依赖，跑起来就是一个小二进制    |
-| [`singbox_all.sh`](singbox_all.sh) | [shtorm-7/sing-box-extended](https://github.com/shtorm-7/sing-box-extended) | 8   | 需要 MTPROXY / 更多扩展能力时用 |
+| 脚本                                 | 内核                                                                          | 协议数 | 适用                                                  |
+| ---------------------------------- | --------------------------------------------------------------------------- | --- | --------------------------------------------------- |
+| [`shoes_all.sh`](shoes_all.sh)     | [cfal/shoes](https://github.com/cfal/shoes)（Rust，静态 musl 二进制）               | 7   | 轻量，无依赖，跑起来就是一个小二进制                                  |
+| [`singbox_all.sh`](singbox_all.sh) | [shtorm-7/sing-box-extended](https://github.com/shtorm-7/sing-box-extended) | 8   | 需要 MTPROXY / 更多扩展能力时用                               |
 | [`xray_all.sh`](xray_all.sh)       | [XTLS/Xray-core](https://github.com/XTLS/Xray-core)                         | 5   | Xray 生态正统实现，Reality/Vision 本家；不支持 QUIC 系协议与 MTProto |
 
 ---
@@ -18,7 +18,6 @@
 curl -fsSL https://raw.githubusercontent.com/ppopcn/shoes_all/refs/heads/main/shoes_all.sh | sudo bash
 ```
 
-
 ### sing-box 全家桶（8 协议 且支持MTPROXY）
 
 ```bash
@@ -30,10 +29,6 @@ curl -fsSL https://raw.githubusercontent.com/ppopcn/shoes_all/refs/heads/main/si
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ppopcn/shoes_all/refs/heads/main/xray_all.sh | sudo bash
 ```
-
-协议：Reality(443) / VLESS(8989, TLS+WS `/vless`) / VMess(8990, TLS+WS `/vmess`) / Trojan(8444) / Shadowsocks(8388)。
-Xray 不支持 Hysteria2 / TUIC / MTProto（QUIC 系协议不在其路线图内），所以没有这三样。
-
 
 ### 装之前先自检（可选）
 
@@ -56,15 +51,15 @@ curl -fsSL "$U" | grep -q 'x25519' && curl -fsSL "$U" | sudo bash
 ```bash
 # shoes：可选 hy2 tuic ss vless vmess trojan reality
 curl -fsSL https://raw.githubusercontent.com/ppopcn/shoes_all/refs/heads/main/shoes_all.sh \
-  | sudo PROTOCOLS=hy2,reality bash
+  | sudo PROTOCOLS=hy2,tuic,ss,vless,vmess,trojan,reality bash
 
 # sing-box：可选 mt hy2 tuic ssr vless trojan reality
 curl -fsSL https://raw.githubusercontent.com/ppopcn/shoes_all/refs/heads/main/singbox_all.sh \
-  | sudo PROTOCOLS=hy2,tuic,trojan bash
+  | sudo PROTOCOLS=mt,hy2,tuic,ss,vless,vmess,trojan,reality bash
 
 # xray：可选 reality vless vmess trojan ss
 curl -fsSL https://raw.githubusercontent.com/ppopcn/shoes_all/refs/heads/main/xray_all.sh \
-  | sudo PROTOCOLS=reality,trojan bash
+  | sudo PROTOCOLS=reality,vless,vmess,trojan,ss bash
 ```
 
 ---
@@ -81,43 +76,43 @@ sudo env PROTOCOLS=vless bash shoes_all.sh          # 已 sudo 时
 
 ### PROTOCOLS 可选值
 
-| 协议 | shoes_all.sh | singbox_all.sh | xray_all.sh |
-| ---- | ------------ | -------------- | ----------- |
-| MTPROXY | ❌ 不支持 | `mt` | ❌ 不支持 |
-| Hysteria2 | `hy2` | `hy2` | ❌ 不支持 |
-| TUIC v5 | `tuic` | `tuic` | ❌ 不支持 |
-| Shadowsocks | `ss` | `ss` | `ss` |
-| VLESS | `vless`（独立） | `vless`（独立） | `vless`（TLS+WS） |
-| VMess | `vmess`（独立） | `vmess`（独立） | `vmess`（TLS+WS） |
-| Trojan | `trojan` | `trojan` | `trojan` |
-| Reality | `reality` | `reality` | `reality`（含 Vision） |
+| 协议          | shoes_all.sh | singbox_all.sh | xray_all.sh         |
+| ----------- | ------------ | -------------- | ------------------- |
+| MTPROXY     | ❌ 不支持        | `mt`           | ❌ 不支持               |
+| Hysteria2   | `hy2`        | `hy2`          | ❌ 不支持               |
+| TUIC v5     | `tuic`       | `tuic`         | ❌ 不支持               |
+| Shadowsocks | `ss`         | `ss`           | `ss`                |
+| VLESS       | `vless`（独立）  | `vless`（独立）    | `vless`（TLS+WS）     |
+| VMess       | `vmess`（独立）  | `vmess`（独立）    | `vmess`（TLS+WS）     |
+| Trojan      | `trojan`     | `trojan`       | `trojan`            |
+| Reality     | `reality`    | `reality`      | `reality`（含 Vision） |
 
 - 不传 `PROTOCOLS` 时默认全部安装：shoes 为 `hy2,tuic,ss,vless,vmess,trojan,reality`；sing-box 为 `mt,hy2,tuic,ss,vless,vmess,trojan,reality`；xray 为 `reality,vless,vmess,trojan,ss`
 - 传其他值会直接报错；逗号分隔、可任意组合；sing-box 兼容旧写法 `ssr`
 
 ### 通用参数（两边风格一致）
 
-| 变量 | 默认 | 说明 |
-| ---- | ---- | ---- |
-| `HY2_PORT` / `TUIC_PORT` / `SS_PORT` | 443 / 8443 / 8388 | 各协议端口 |
-| `VLESS_PORT` / `VMESS_PORT` / `TROJAN_PORT` / `REALITY_PORT` | 8989 / 8990 / 8444 / 8899 | 各协议端口（xray 的 Reality 默认占 443） |
-| `REALITY_DEST` | shoes/sing-box: `www.microsoft.com:443`；**xray: `www.cloudflare.com:443`** | Reality 握手目标（需支持 TLS1.3+H2）。⚠️ Xray 别用 microsoft.com：其证书记录 8273 字节超过 REALITY 解析器 8192 上限，握手必失败（XTLS #6356） |
-| `DOMAIN` | 随机伪装域名 | SNI / 自签证书域名 |
-| `MIRROR` | （空） | GitHub 下载镜像前缀，如 `https://ghfast.top/` |
-| `SERVER_ADDR` | 自动探测 | 手动指定对外 IP（生成链接用） |
-| `LOG_LEVEL` | `info`（xray: `warning`） | 日志级别，排错可设 `debug` |
-| `CERT_FILE` / `KEY_FILE` | （自动生成） | 使用已有证书 |
-| `HY2_PASSWORD` / `TUIC_UUID` / `VLESS_UUID` 等凭据 | 随机生成 | 已有配置会自动复用，无需每次传 |
+| 变量                                                           | 默认                                                                         | 说明                                                                                                         |
+| ------------------------------------------------------------ | -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `HY2_PORT` / `TUIC_PORT` / `SS_PORT`                         | 443 / 8443 / 8388                                                          | 各协议端口                                                                                                      |
+| `VLESS_PORT` / `VMESS_PORT` / `TROJAN_PORT` / `REALITY_PORT` | 8989 / 8990 / 8444 / 8899                                                  | 各协议端口（xray 的 Reality 默认占 443）                                                                              |
+| `REALITY_DEST`                                               | shoes/sing-box: `www.microsoft.com:443`；**xray: `www.cloudflare.com:443`** | Reality 握手目标（需支持 TLS1.3+H2）。⚠️ Xray 别用 microsoft.com：其证书记录 8273 字节超过 REALITY 解析器 8192 上限，握手必失败（XTLS #6356） |
+| `DOMAIN`                                                     | 随机伪装域名                                                                     | SNI / 自签证书域名                                                                                               |
+| `MIRROR`                                                     | （空）                                                                        | GitHub 下载镜像前缀，如 `https://ghfast.top/`                                                                      |
+| `SERVER_ADDR`                                                | 自动探测                                                                       | 手动指定对外 IP（生成链接用）                                                                                           |
+| `LOG_LEVEL`                                                  | `info`（xray: `warning`）                                                    | 日志级别，排错可设 `debug`                                                                                          |
+| `CERT_FILE` / `KEY_FILE`                                     | （自动生成）                                                                     | 使用已有证书                                                                                                     |
+| `HY2_PASSWORD` / `TUIC_UUID` / `VLESS_UUID` 等凭据              | 随机生成                                                                       | 已有配置会自动复用，无需每次传                                                                                            |
 
 ### 脚本专属参数
 
-| 变量 | 适用 | 说明 |
-| ---- | ---- | ---- |
-| `SHOES_TAG` | shoes | 锁定内核版本，如 `v0.3.3` |
-| `SINGBOX_TAG` | sing-box | 锁定内核版本 |
-| `XRAY_TAG` | xray | 锁定内核版本（默认自动取 GitHub 最新 release） |
-| `FORCE_BIN=1` | sing-box | 强制重新下载二进制 |
-| `<NAME>_V` | shoes / xray | 显式覆盖凭据，如 `HY2_PASSWORD_V=xxx`（重装想固定密码时用） |
+| 变量            | 适用           | 说明                                       |
+| ------------- | ------------ | ---------------------------------------- |
+| `SHOES_TAG`   | shoes        | 锁定内核版本，如 `v0.3.3`                        |
+| `SINGBOX_TAG` | sing-box     | 锁定内核版本                                   |
+| `XRAY_TAG`    | xray         | 锁定内核版本（默认自动取 GitHub 最新 release）          |
+| `FORCE_BIN=1` | sing-box     | 强制重新下载二进制                                |
+| `<NAME>_V`    | shoes / xray | 显式覆盖凭据，如 `HY2_PASSWORD_V=xxx`（重装想固定密码时用） |
 
 ### 组合示例
 
@@ -152,13 +147,13 @@ sudo PROTOCOLS=vless,vmess DOMAIN=foo.example.com bash shoes_all.sh
 
 **xray_all.sh**
 
-| 协议 | 端口 | 传输 | 说明 |
-| --- | --- | --- | --- |
-| Reality | 443/tcp | TCP | VLESS + XTLS Vision，无需证书 |
-| VLESS | 8989/tcp | TLS + WS | 路径 `/vless` |
-| VMess | 8990/tcp | TLS + WS | 路径 `/vmess`，aid=0 |
-| Trojan | 8444/tcp | TCP + TLS | |
-| Shadowsocks | 8388/tcp+udp | TCP+UDP | aes-256-gcm |
+| 协议          | 端口           | 传输        | 说明                       |
+| ----------- | ------------ | --------- | ------------------------ |
+| Reality     | 443/tcp      | TCP       | VLESS + XTLS Vision，无需证书 |
+| VLESS       | 8989/tcp     | TLS + WS  | 路径 `/vless`              |
+| VMess       | 8990/tcp     | TLS + WS  | 路径 `/vmess`，aid=0        |
+| Trojan      | 8444/tcp     | TCP + TLS |                          |
+| Shadowsocks | 8388/tcp+udp | TCP+UDP   | aes-256-gcm              |
 
 ---
 
@@ -217,16 +212,16 @@ xray-all info/status/logs/update/uninstall   # 同上的 xray 版本
 
 ## 踩过的坑（客户端连不上先看这里）
 
-| 现象                                                      | 原因                                             | 处理                                             |
-| ------------------------------------------------------- | ---------------------------------------------- | ---------------------------------------------- |
-| VMess 报 `Standard format data stream was not requested` | 客户端 VMess 加密方式选了 `auto / none / zero`，会关闭标准数据流 | 改成 `aes-128-gcm`（脚本生成的链接已固定 `scy=aes-128-gcm`） |
-| TUIC 握手失败                                               | 客户端没带 `alpn=h3`，或服务端开了 0-RTT                   | 链接已带 `alpn=h3`，服务端 `zero_rtt_handshake=false`  |
-| Reality 报 `VLESS addons not supported ... VISION`       | 客户端带 `flow=xtls-rprx-vision` 但服务端未开 vision     | 服务端 `vision: true`，脚本已默认开启                     |
-| 日志里 `invalid client protocol version ... got 71`        | 客户端延迟探测往端口打了明文 `GET`（71 是字母 G）                 | 忽略，不是故障                                        |
-| `shoes-all logs` 没输出（Alpine）                            | 旧版 OpenRC 用 start-stop-daemon，忽略 output_log    | 已改用 `supervise-daemon`，更新脚本后正常                 |
-| 拉到的脚本是旧版                                                | raw 的 Fastly 缓存 300 秒                          | 等 5 分钟，或按 commit sha 拉                          |
-| xray Reality 握手失败，日志 `REALITY: processed invalid connection ... handshake did not complete` | `REALITY_DEST` 用了 www.microsoft.com，其证书记录 8273 字节超过 REALITY 解析器 8192 硬编码上限（XTLS #6356） | 换 dest，如 `www.cloudflare.com:443`（xray 脚本已默认），服务端和客户端 SNI 要同步改 |
-| Xray 26.x 客户端报 `The feature "allowInsecure" has been removed` | 新版 Xray 客户端移除了 allowInsecure，迁到 `pinnedPeerCertSha256`（hex 编码的证书 DER sha256） | 客户端改用 pin，或用支持 insecure 的客户端内核；有域名建议挂真证书一劳永逸 |
+| 现象                                                                                          | 原因                                                                                                                       | 处理                                                             |
+| ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------- |
+| VMess 报 `Standard format data stream was not requested`                                     | 客户端 VMess 加密方式选了 `auto / none / zero`，会关闭标准数据流                                                                           | 改成 `aes-128-gcm`（脚本生成的链接已固定 `scy=aes-128-gcm`）                 |
+| TUIC 握手失败                                                                                   | 客户端没带 `alpn=h3`，或服务端开了 0-RTT                                                                                             | 链接已带 `alpn=h3`，服务端 `zero_rtt_handshake=false`                  |
+| Reality 报 `VLESS addons not supported ... VISION`                                           | 客户端带 `flow=xtls-rprx-vision` 但服务端未开 vision                                                                               | 服务端 `vision: true`，脚本已默认开启                                     |
+| 日志里 `invalid client protocol version ... got 71`                                            | 客户端延迟探测往端口打了明文 `GET`（71 是字母 G）                                                                                           | 忽略，不是故障                                                        |
+| `shoes-all logs` 没输出（Alpine）                                                                | 旧版 OpenRC 用 start-stop-daemon，忽略 output_log                                                                              | 已改用 `supervise-daemon`，更新脚本后正常                                 |
+| 拉到的脚本是旧版                                                                                    | raw 的 Fastly 缓存 300 秒                                                                                                    | 等 5 分钟，或按 commit sha 拉                                         |
+| xray Reality 握手失败，日志 `REALITY: processed invalid connection ... handshake did not complete` | `REALITY_DEST` 用了 [www.microsoft.com，其证书记录](http://www.microsoft.com，其证书记录) 8273 字节超过 REALITY 解析器 8192 硬编码上限（XTLS #6356） | 换 dest，如 `www.cloudflare.com:443`（xray 脚本已默认），服务端和客户端 SNI 要同步改 |
+| Xray 26.x 客户端报 `The feature "allowInsecure" has been removed`                               | 新版 Xray 客户端移除了 allowInsecure，迁到 `pinnedPeerCertSha256`（hex 编码的证书 DER sha256）                                             | 客户端改用 pin，或用支持 insecure 的客户端内核；有域名建议挂真证书一劳永逸                   |
 
 ---
 
