@@ -2185,6 +2185,9 @@ print_summary_all() {
   printf '  配置文件      : %s (单文件含全部入站)\n' "$CONFIG_FILE"
   printf '  二进制        : %s\n' "$BIN_PATH"
   printf '  服务名        : %s (单进程)\n' "$SERVICE_NAME"
+  local _kbver
+  _kbver=$( { "$BIN_PATH" version 2>/dev/null || true; } | sed -n 1p )
+  printf '  内核版本      : %s\n' "${_kbver:-未知(未装)}"
   printf '  初始化系统    : %s\n' "$INIT_SYSTEM"
   if want_proto hy2 || want_proto tuic || want_proto vless || want_proto vmess || want_proto trojan; then
     printf '  证书          : %s (自签, 客户端需跳过校验)\n' "$CERT_FILE"
