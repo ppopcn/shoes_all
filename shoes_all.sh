@@ -303,6 +303,7 @@ EOF
       type: shadowsocks
       cipher: aes-256-gcm
       password: ${SS_PASSWORD}
+      udp_enabled: true
 EOF
   fi
   if enabled vless; then
@@ -611,7 +612,7 @@ print_summary() {
   # ---- 入站总览表 ----
   if enabled hy2;     then rows+=("Hysteria2|${HY2_PORT}/udp|QUIC / hy2"); fi
   if enabled tuic;    then rows+=("TUIC v5|${TUIC_PORT}/udp|QUIC"); fi
-  if enabled ss;      then rows+=("Shadowsocks|${SS_PORT}/tcp|aes-256-gcm"); fi
+  if enabled ss;      then rows+=("Shadowsocks|${SS_PORT}/tcp|aes-256-gcm (UDP over TCP)"); fi
   if enabled vless;   then rows+=("VLESS|${VLESS_PORT}/tcp|TLS 直连"); fi
   if enabled vmess;   then rows+=("VMess|${VMESS_PORT}/tcp|TLS 直连 AEAD"); fi
   if enabled trojan;  then rows+=("Trojan|${TROJAN_PORT}/tcp|TLS 直连"); fi

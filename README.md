@@ -133,15 +133,15 @@ sudo PROTOCOLS=vless,vmess DOMAIN=foo.example.com bash shoes_all.sh
 
 **shoes_all.sh**
 
-| 协议          | 端口       | 传输        | 说明                       |
-| ----------- | -------- | --------- | ------------------------ |
-| Hysteria2   | 443/udp  | QUIC      | 抗封锁首选                    |
-| TUIC v5     | 8443/udp | QUIC      | 需 `alpn=h3`              |
-| Shadowsocks | 8388/tcp | TCP       | aes-256-gcm；**仅 TCP，内核不支持 UDP 转发** |
-| VLESS       | 8989/tcp | TCP + TLS | 自签证书                     |
-| VMess       | 8990/tcp | TCP + TLS | 加密方式须 `aes-128-gcm`      |
-| Trojan      | 8444/tcp | TCP + TLS |                          |
-| Reality     | 8899/tcp | TCP       | VLESS + XTLS Vision，无需证书 |
+| 协议          | 端口       | 传输        | 说明                                 |
+| ----------- | -------- | --------- | ---------------------------------- |
+| Hysteria2   | 443/udp  | QUIC      | 抗封锁首选                              |
+| TUIC v5     | 8443/udp | QUIC      | 需 `alpn=h3`                        |
+| Shadowsocks | 8388/tcp | TCP       | aes-256-gcm；UDP 走 UDP over TCP（`udp_enabled: true`，默认开启），客户端需支持 UoT |
+| VLESS       | 8989/tcp | TCP + TLS | 自签证书                               |
+| VMess       | 8990/tcp | TCP + TLS | 加密方式须 `aes-128-gcm`                |
+| Trojan      | 8444/tcp | TCP + TLS |                                    |
+| Reality     | 8899/tcp | TCP       | VLESS + XTLS Vision，无需证书           |
 
 **singbox_all.sh**：另有 MTPROXY 443/tcp（与 HY2 的 443/udp 共存），VLESS/VMess 走 TLS + WS，端口同上表。sing-box 的 Shadowsocks 是 `8388/tcp+udp`，UDP 转发可用。
 
@@ -201,12 +201,12 @@ sudo SINGBOX_TAG=latest bash singbox_all.sh install
 sudo SINGBOX_TAG=v1.14.3-extended-2.7.3 bash singbox_all.sh install
 ```
 
-| 脚本       | 安装锁定默认                     | update 默认      | latest 行为                                    |
-| -------- | ------------------------ | --------------- | -------------------------------------------- |
-| shoes    | `v0.3.3`                 | 上游最新            | 取 releases 列表第 1 条，失败回退锁定版本并告警                |
-| sing-box | `v1.14.3-extended-2.7.3` | （无 update 子命令）  | 取 releases 列表第 1 条，失败直接报错（可 `SINGBOX_TAG=v...` 指定） |
-| xray     | `v26.3.27`               | 上游最新            | 取 releases 列表第 1 条，失败回退锁定版本并告警                |
 
+| 脚本       | 安装锁定默认                   | update 默认      | latest 行为                                          |
+| -------- | ------------------------ | -------------- | -------------------------------------------------- |
+| shoes    | `v0.3.3`                 | 上游最新           | 取 releases 列表第 1 条，失败回退锁定版本并告警                     |
+| sing-box | `v1.14.3-extended-2.7.3` | （无 update 子命令） | 取 releases 列表第 1 条，失败直接报错（可 `SINGBOX_TAG=v...` 指定） |
+| xray     | `v26.3.27`               | 上游最新           | 取 releases 列表第 1 条，失败回退锁定版本并告警                     |
 
 > 设计意图：**install 求稳**（新机器装出来的永远是验证过的版本）、**update 求新**（日常一条命令追上游）、**钉版本求可控**（`XXX_TAG=vX.Y.Z` 显式覆盖两者）。显式设置的 `XXX_TAG` 优先级最高，install 和 update 都认。
 
@@ -243,11 +243,11 @@ curl -fsSL "https://api.github.com/repos/XTLS/Xray-core/releases?per_page=5" \
 
 ## 支持的平台
 
-| 发行版                          | init    | 包管理       | 防火墙                  |
-| ---------------------------- | ------- | --------- | -------------------- |
-| Debian / Ubuntu              | systemd | apt       | ufw → iptables       |
-| CentOS / RHEL / Rocky / Alma | systemd | dnf 或 yum | firewalld → iptables |
-| Alpine                       | OpenRC  | apk       | iptables（sing-box 自动持久化；shoes/xray 仅插入规则，重启后可能丢失）    |
+| 发行版                          | init    | 包管理       | 防火墙                                               |
+| ---------------------------- | ------- | --------- | ------------------------------------------------- |
+| Debian / Ubuntu              | systemd | apt       | ufw → iptables                                    |
+| CentOS / RHEL / Rocky / Alma | systemd | dnf 或 yum | firewalld → iptables                              |
+| Alpine                       | OpenRC  | apk       | iptables（sing-box 自动持久化；shoes/xray 仅插入规则，重启后可能丢失） |
 
 - 架构：x86_64 / aarch64（shoes 用官方 musl 静态包，glibc 发行版同样可用；无 32 位 ARM 包）
 - RHEL 系若 SELinux 为 Enforcing，脚本会提示；服务起不来时先看 `/var/log/audit/audit.log`
@@ -263,25 +263,25 @@ curl -fsSL "https://api.github.com/repos/XTLS/Xray-core/releases?per_page=5" \
 
 方法：服务端装全家桶后，客户端在**同一台机器的 127.0.0.1** 上回环直连各入站（xray 充当 TCP 系客户端、sing-box 充当 QUIC 系客户端），逐协议独立建连并请求 `https://www.gstatic.com/generate_204`，返回 204 才记为通过。**三个脚本单独测，每个测完立即 uninstall 再装下一个**（端口重叠，同机不能并存）。
 
-| 脚本                | 通过 / 总数 | 明细                                                       |
-| ----------------- | ------- | -------------------------------------------------------- |
-| `shoes_all.sh`    | 5 / 5   | ss、vless、vmess、trojan、reality 全通（hy2/tuic 仅确认 UDP 监听就绪，未做 QUIC 客户端验证） |
-| `singbox_all.sh`  | 7 / 7   | ss、vless、vmess、trojan、reality、hy2、tuic 全通                 |
-| `xray_all.sh`     | 5 / 5   | ss、vless(WS)、vmess(WS)、trojan、reality 全通                  |
+| 脚本               | 通过 / 总数 | 明细                                                                    |
+| ---------------- | ------- | --------------------------------------------------------------------- |
+| `shoes_all.sh`   | 5 / 5   | ss、vless、vmess、trojan、reality 全通（hy2/tuic 仅确认 UDP 监听就绪，未做 QUIC 客户端验证） |
+| `singbox_all.sh` | 7 / 7   | ss、vless、vmess、trojan、reality、hy2、tuic 全通                             |
+| `xray_all.sh`    | 5 / 5   | ss、vless(WS)、vmess(WS)、trojan、reality 全通                              |
 
 升级路径实测（Debian 13）：
 
-| 场景 | 结果 |
-| --- | --- |
-| `XRAY_TAG=v26.9.8 install` → `update` | v26.9.8 → **v26.10.21**，服务重启正常，5 协议回归通过 |
-| `SHOES_TAG=v0.2.7 install` → `update` | v0.2.7 → **v0.3.3**，服务重启正常，5 协议回归通过（v0.2.7 的 `-d` 校验兜底同时验证） |
-| `SINGBOX_TAG=latest install` | 解析到 **v1.14.3-extended-2.7.3**（新于锁定的 2.7.2），SHA256 校验通过，7 协议回归通过 |
-| `XRAY_TAG=v26.3.27 update` | 从 v26.10.21 降回 v26.3.27，钉版本生效 |
-| 重复 `install` | 打印「已安装 x.y.z, 跳过下载」，不重复拉二进制 |
+| 场景                                    | 结果                                                               |
+| ------------------------------------- | ---------------------------------------------------------------- |
+| `XRAY_TAG=v26.9.8 install` → `update` | v26.9.8 → **v26.10.21**，服务重启正常，5 协议回归通过                          |
+| `SHOES_TAG=v0.2.7 install` → `update` | v0.2.7 → **v0.3.3**，服务重启正常，5 协议回归通过（v0.2.7 的 `-d` 校验兜底同时验证）      |
+| `SINGBOX_TAG=latest install`          | 解析到 **v1.14.3-extended-2.7.3**（新于锁定的 2.7.2），SHA256 校验通过，7 协议回归通过 |
+| `XRAY_TAG=v26.3.27 update`            | 从 v26.10.21 降回 v26.3.27，钉版本生效                                    |
+| 重复 `install`                          | 打印「已安装 x.y.z, 跳过下载」，不重复拉二进制                                      |
 
 补充验证：
 
-- **Shadowsocks UDP 中转**：xray 版实测通过（`dokodemo-door` → SS UDP → `8.8.8.8:53` 解析成功）；shoes 版内核不支持，sing-box 版监听 `8388/udp`。
+- **Shadowsocks UDP 中转**：xray 版实测通过（`dokodemo-door` → SS UDP → `8.8.8.8:53` 解析成功）；sing-box 版监听 `8388/udp`（原生 UDP relay）；shoes 版走 UDP over TCP（`udp_enabled: true`，脚本已显式开启），因缺 UoT 客户端未做端到端验证。
 - **卸载**：服务单元、配置目录、二进制均清除；用户用 `CERT_FILE` 指定的证书会被保留；防火墙规则保留但给出清理命令。
 - **未覆盖**：MTPROXY 的端到端登录需要真实 Telegram 账号，本轮只验证了入站工作正常（连接被接住并走伪装逻辑）与配置合法性；hy2/tuic 的 QUIC 回环在 sing-box 版做过，shoes 版因缺客户端未做。
 
@@ -289,23 +289,23 @@ curl -fsSL "https://api.github.com/repos/XTLS/Xray-core/releases?per_page=5" \
 
 ## 踩过的坑（客户端连不上先看这里）
 
-| 现象                                                                                          | 原因                                                                                                                       | 处理                                                             |
-| ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------- |
-| VMess 报 `Standard format data stream was not requested`                                     | 客户端 VMess 加密方式选了 `auto / none / zero`，会关闭标准数据流                                                                           | 改成 `aes-128-gcm`（脚本生成的链接已固定 `scy=aes-128-gcm`）                 |
-| TUIC 握手失败                                                                                   | 客户端没带 `alpn=h3`，或服务端开了 0-RTT                                                                                             | 链接已带 `alpn=h3`，服务端 `zero_rtt_handshake=false`                  |
-| Reality 报 `VLESS addons not supported ... VISION`                                           | 客户端带 `flow=xtls-rprx-vision` 但服务端未开 vision                                                                               | 服务端 `vision: true`，脚本已默认开启                                     |
-| 日志里 `invalid client protocol version ... got 71`                                            | 客户端延迟探测往端口打了明文 `GET`（71 是字母 G）                                                                                           | 忽略，不是故障                                                        |
-| `shoes-all logs` 没输出（Alpine）                                                                | 旧版 OpenRC 用 start-stop-daemon，忽略 output_log                                                                              | 已改用 `supervise-daemon`，更新脚本后正常                                 |
-| 拉到的脚本是旧版                                                                                    | raw 的 Fastly 缓存 300 秒                                                                                                    | 等 5 分钟，或按 commit sha 拉                                         |
-| xray Reality 握手失败，日志 `REALITY: processed invalid connection ... handshake did not complete` | `REALITY_DEST` 用了 [www.microsoft.com，其证书记录](http://www.microsoft.com，其证书记录) 8273 字节超过 REALITY 解析器 8192 硬编码上限（XTLS #6356） | 换 dest，如 `www.cloudflare.com:443`（xray 脚本已默认），服务端和客户端 SNI 要同步改 |
-| Xray 26.x 客户端报 `The feature "allowInsecure" has been removed`                               | 新版 Xray 客户端移除了 allowInsecure，迁到 `pinnedPeerCertSha256`（hex 编码的证书 DER sha256）                                             | 客户端改用 pin，或用支持 insecure 的客户端内核；有域名建议挂真证书一劳永逸                   |
-| xray 版 VLESS/VMess 连上但没流量，服务端日志 `http2: server: error reading preface ... bogus greeting` | 这两个入站是 **WS 传输**，客户端漏配 `path` / `Host` 时，TLS 层通了但 HTTP Upgrade 不成立                                                              | 客户端补上 `path=/vless`（或 `/vmess`）与 `Host`=SNI；这一点和 shoes 版的裸 TCP 不同 |
-| sing-box 的 443 端口「连上了但没数据」                                                              | MTPROXY 用 `domain_fronting_port=443` + secret 尾部域名做伪装，非 MTPROXY 流量会被转发到 `www.cloudflare.com:443`（返回 TLS Alert）。这是设计行为，不是串线 | 检查 secret 是否用完整 `ee...` 串、客户端是否开了 MTPROXY 类型；抓包会看到目标域名是 cloudflare |
-| shoes 的 Shadowsocks 没有 UDP 中转                                                              | shoes 内核的 shadowsocks 入站只支持 `type/cipher/password`，无 UDP 配置项（见上游 CONFIG.md）                                              | 需要 SS UDP（游戏、DNS）就用 sing-box 或 xray 版；shoes 版只能代理 TCP            |
-| 卸载后 `ufw status` 里端口还在放行                                                                | 卸载**不会自动删防火墙规则**（避免误删你自建的规则），只打印可复制的删除命令                                                                                     | 按卸载输出的 `ufw delete allow <port>` 逐条清；换内核前先清一次能避免规则越积越多      |
-| 钉老版本 shoes（v0.2.x）装不上，报 `PathNotFound: /root/check`                                        | 老版本没有 `check` 子命令，把 "check" 当成了配置文件路径                                                                                     | 已改为 `check` 失败时用 `shoes -d`（dry-run）兜底校验，老版本也能装                |
-| 同机装第二个全家桶后服务起不来，日志里没有明显错误                                                          | 三个脚本的默认端口是同一套（8388/8444/8989/8990…），同机只能跑一个                                                                                | 先 `uninstall` 另一个；脚本现在会在启动失败时直接提示端口占用                        |
-| `update` 显示"升级完成"但版本没变                                                                      | 用 `/releases/latest` 取版，上游把新版都标成 prerelease 时它会停在旧版（Xray 从 v26.6 起如此）                                                            | 已改为读 releases 列表第一条；见下方「为什么 latest 不用 /releases/latest」        |
+| 现象                                                                                          | 原因                                                                                                                         | 处理                                                                 |
+| ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| VMess 报 `Standard format data stream was not requested`                                     | 客户端 VMess 加密方式选了 `auto / none / zero`，会关闭标准数据流                                                                             | 改成 `aes-128-gcm`（脚本生成的链接已固定 `scy=aes-128-gcm`）                     |
+| TUIC 握手失败                                                                                   | 客户端没带 `alpn=h3`，或服务端开了 0-RTT                                                                                               | 链接已带 `alpn=h3`，服务端 `zero_rtt_handshake=false`                      |
+| Reality 报 `VLESS addons not supported ... VISION`                                           | 客户端带 `flow=xtls-rprx-vision` 但服务端未开 vision                                                                                 | 服务端 `vision: true`，脚本已默认开启                                         |
+| 日志里 `invalid client protocol version ... got 71`                                            | 客户端延迟探测往端口打了明文 `GET`（71 是字母 G）                                                                                             | 忽略，不是故障                                                            |
+| `shoes-all logs` 没输出（Alpine）                                                                | 旧版 OpenRC 用 start-stop-daemon，忽略 output_log                                                                                | 已改用 `supervise-daemon`，更新脚本后正常                                     |
+| 拉到的脚本是旧版                                                                                    | raw 的 Fastly 缓存 300 秒                                                                                                      | 等 5 分钟，或按 commit sha 拉                                             |
+| xray Reality 握手失败，日志 `REALITY: processed invalid connection ... handshake did not complete` | `REALITY_DEST` 用了 [www.microsoft.com，其证书记录](http://www.microsoft.com，其证书记录) 8273 字节超过 REALITY 解析器 8192 硬编码上限（XTLS #6356）   | 换 dest，如 `www.cloudflare.com:443`（xray 脚本已默认），服务端和客户端 SNI 要同步改     |
+| Xray 26.x 客户端报 `The feature "allowInsecure" has been removed`                               | 新版 Xray 客户端移除了 allowInsecure，迁到 `pinnedPeerCertSha256`（hex 编码的证书 DER sha256）                                               | 客户端改用 pin，或用支持 insecure 的客户端内核；有域名建议挂真证书一劳永逸                       |
+| xray 版 VLESS/VMess 连上但没流量，服务端日志 `http2: server: error reading preface ... bogus greeting`   | 这两个入站是 **WS 传输**，客户端漏配 `path` / `Host` 时，TLS 层通了但 HTTP Upgrade 不成立                                                         | 客户端补上 `path=/vless`（或 `/vmess`）与 `Host`=SNI；这一点和 shoes 版的裸 TCP 不同  |
+| sing-box 的 443 端口「连上了但没数据」                                                                  | MTPROXY 用 `domain_fronting_port=443` + secret 尾部域名做伪装，非 MTPROXY 流量会被转发到 `www.cloudflare.com:443`（返回 TLS Alert）。这是设计行为，不是串线 | 检查 secret 是否用完整 `ee...` 串、客户端是否开了 MTPROXY 类型；抓包会看到目标域名是 cloudflare |
+| shoes 的 Shadowsocks UDP 不通                                                          | shoes 的 SS 入站 UDP 是 **UDP over TCP**（`udp_enabled`，默认 true），不是原生 UDP relay；普通 SS 客户端按标准 UDP ASSOCIATE 打 UDP 包不通                | 客户端开启 UDP over TCP（UoT）选项（sing-box `udp_over_tcp`、Clash.Meta `smux`+UoT 等）；需要原生 UDP relay 就用 sing-box 或 xray 版 |
+| 卸载后 `ufw status` 里端口还在放行                                                                    | 卸载**不会自动删防火墙规则**（避免误删你自建的规则），只打印可复制的删除命令                                                                                   | 按卸载输出的 `ufw delete allow <port>` 逐条清；换内核前先清一次能避免规则越积越多             |
+| 钉老版本 shoes（v0.2.x）装不上，报 `PathNotFound: /root/check`                                         | 老版本没有 `check` 子命令，把 "check" 当成了配置文件路径                                                                                      | 已改为 `check` 失败时用 `shoes -d`（dry-run）兜底校验，老版本也能装                    |
+| 同机装第二个全家桶后服务起不来，日志里没有明显错误                                                                   | 三个脚本的默认端口是同一套（8388/8444/8989/8990…），同机只能跑一个                                                                                | 先 `uninstall` 另一个；脚本现在会在启动失败时直接提示端口占用                              |
+| `update` 显示"升级完成"但版本没变                                                                      | 用 `/releases/latest` 取版，上游把新版都标成 prerelease 时它会停在旧版（Xray 从 v26.6 起如此）                                                      | 已改为读 releases 列表第一条；见下方「为什么 latest 不用 /releases/latest」            |
 
 ---
 
