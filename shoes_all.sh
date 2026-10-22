@@ -35,6 +35,9 @@ CONF_FILE="${CONF_DIR}/all.yaml"
 CREDS_FILE="${CONF_DIR}/creds.env"
 CERT_FILE_DEFAULT="${CONF_DIR}/cert.pem"
 KEY_FILE_DEFAULT="${CONF_DIR}/key.pem"
+# set -u 下必须早绑定: 只装 ss/reality 时 ensure_cert 不会执行, 此后再引用会 unbound
+CERT_FILE="${CERT_FILE:-$CERT_FILE_DEFAULT}"
+KEY_FILE="${KEY_FILE:-$KEY_FILE_DEFAULT}"
 LOG_LEVEL="${LOG_LEVEL:-info}"
 
 # ---- 默认端口 / 协议 ----
