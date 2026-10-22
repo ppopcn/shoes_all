@@ -48,8 +48,8 @@ TROJAN_PORT="${TROJAN_PORT:-8444}"
 REALITY_PORT="${REALITY_PORT:-8899}"
 REALITY_DEST="${REALITY_DEST:-www.microsoft.com:443}"   # Reality 握手目标(需为支持 TLS1.3+H2 的真实站点)
 
-# 远端脚本地址: 用于 curl | bash 场景自装本地命令; jsdelivr 无 raw 的 CDN 缓存
-SHOES_RAW_URL="${SHOES_RAW_URL:-https://cdn.jsdelivr.net/gh/ppopcn/shoes_all@main/shoes_all.sh}"
+# 远端脚本地址: 用于 curl | bash 场景自装本地命令 (GitHub 直连)
+SHOES_RAW_URL="${SHOES_RAW_URL:-https://raw.githubusercontent.com/ppopcn/shoes_all/refs/heads/main/shoes_all.sh}"
 
 # ---- 平台探测 ----
 OS_FAMILY=""; INIT_SYS=""; SERVICE_FILE=""
