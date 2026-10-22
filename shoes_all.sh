@@ -12,7 +12,7 @@
 #   sudo bash shoes_all.sh status     # 服务状态
 #   sudo bash shoes_all.sh info       # 重新打印凭据与分享链接
 #   sudo bash shoes_all.sh logs [N]   # 日志
-#   sudo bash shoes_all.sh update     # 升级二进制并重启 (配置不变)
+#   sudo bash shoes_all.sh update     # 升级到上游最新内核并重启 (配置不变; SHOES_TAG=vX.Y.Z 钉版本)
 #   sudo bash shoes_all.sh uninstall  # 卸载 (KEEP_CONFIG=1 保留配置)
 #
 # 环境变量:
@@ -203,8 +203,9 @@ detect_arch_asset() {
 }
 
 resolve_tag() {
-  # 默认用锁定的已验证版本; SHOES_TAG=latest 时才联网取最新 release
-  local tag="${SHOES_TAG:-$SHOES_TAG_DEFAULT}"
+  # $1 可选: SHOES_TAG 未设置时的默认目标 —— install 场景传锁定版本, update 场景传 latest;
+  # SHOES_TAG 显式设置时始终优先(可钉任意版本或 latest)
+  local tag="${SHOES_TAG:-${1:-$SHOES_TAG_DEFAULT}}"
   if [ "$tag" != "latest" ]; then printf '%s' "$tag"; return; fi
   local t
   t=$(curl -fsSL --max-time 10 "https://api.github.com/repos/cfal/shoes/releases/latest" 2>/dev/null \
@@ -214,9 +215,9 @@ resolve_tag() {
 }
 
 install_binary() {
-  local tag; tag=$(resolve_tag)
+  local tag; tag=$(resolve_tag "$@")
   if [ -x "$BIN_PATH" ]; then
-    local cur; cur=$("$BIN_PATH" --version 2>/dev/null | head -1 || true)
+    local cur; cur=$( { "$BIN_PATH" --version 2>/dev/null || true; } | sed -n 1p )
     if echo "$cur" | grep -q "${tag#v}"; then ok "已安装 ${cur}, 跳过下载"; return; fi
     warn "现有版本: ${cur:-未知}, 准备升级到 ${tag}"
   fi
@@ -231,7 +232,7 @@ install_binary() {
   [ -n "$b" ] || die "压缩包内未找到 shoes 二进制"
   install -m 755 "$b" "${BIN_PATH}.new" && mv -f "${BIN_PATH}.new" "$BIN_PATH"
   rm -rf "$tmp"
-  ok "已安装: $("$BIN_PATH" --version 2>&1 | head -1)"
+  ok "已安装: $( { "$BIN_PATH" --version 2>&1 || true; } | sed -n 1p )"
 }
 
 # ---- Reality 密钥 (依赖 shoes 二进制, 需在 install_binary 之后调用) ----
@@ -551,7 +552,7 @@ print_manage_block() {
   printf '  %-44s %s\n' "shoes-all info" "重新打印凭据与分享链接"
   printf '  %-44s %s\n' "shoes-all status" "服务状态与监听端口"
   printf '  %-44s %s\n' "shoes-all logs [N]" "最近 N 行日志"
-  printf '  %-44s %s\n' "shoes-all update" "升级内核并重启"
+  printf '  %-44s %s\n' "shoes-all update" "升级到上游最新内核 (SHOES_TAG=vX.Y.Z 钉版本)"
   printf '  %-44s %s\n' "shoes-all uninstall" "卸载 (KEEP_CONFIG=1 保留配置)"
   echo
   printf '  %s· 排错命令%s\n' "$C_BLD" "$C_RST"
@@ -712,7 +713,8 @@ do_install() {
 }
 
 cmd_update() {
-  detect_platform; install_binary; start_service; install_self
+  # update 默认拉上游最新版; SHOES_TAG=钉版本 时退化为按版本修复
+  detect_platform; install_binary latest; start_service; install_self
   log "升级完成: $( { "$BIN_PATH" --version 2>&1 || true; } | sed -n 1p )"
 }
 

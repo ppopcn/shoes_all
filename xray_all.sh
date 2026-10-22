@@ -15,7 +15,7 @@
 #   sudo bash xray_all.sh status     # 服务状态
 #   sudo bash xray_all.sh info       # 重新打印凭据与分享链接
 #   sudo bash xray_all.sh logs [N]   # 日志
-#   sudo bash xray_all.sh update     # 升级二进制并重启 (配置不变)
+#   sudo bash xray_all.sh update     # 升级到上游最新内核并重启 (配置不变; XRAY_TAG=vX.Y.Z 钉版本)
 #   sudo bash xray_all.sh uninstall  # 卸载 (KEEP_CONFIG=1 保留配置)
 #
 # 环境变量:
@@ -205,8 +205,9 @@ detect_arch_asset() {
 XRAY_TAG_DEFAULT="v26.3.27"
 
 resolve_tag() {
-  # 默认用锁定的已验证版本; XRAY_TAG=latest 时才联网取最新 release
-  local tag="${XRAY_TAG:-$XRAY_TAG_DEFAULT}"
+  # $1 可选: XRAY_TAG 未设置时的默认目标 —— install 场景传锁定版本, update 场景传 latest;
+  # XRAY_TAG 显式设置时始终优先(可钉任意版本或 latest)
+  local tag="${XRAY_TAG:-${1:-$XRAY_TAG_DEFAULT}}"
   if [ "$tag" != "latest" ]; then printf '%s' "$tag"; return; fi
   local t
   t=$(curl -fsSL --max-time 10 "https://api.github.com/repos/XTLS/Xray-core/releases/latest" 2>/dev/null \
@@ -216,7 +217,7 @@ resolve_tag() {
 }
 
 install_binary() {
-  local tag; tag=$(resolve_tag)
+  local tag; tag=$(resolve_tag "$@")
   [ -n "$tag" ] || tag="$XRAY_TAG_DEFAULT"
   if [ -x "$BIN_PATH" ]; then
     local cur; cur=$( { "$BIN_PATH" version 2>/dev/null || true; } | sed -n '1s/^\(Xray [^ ]*\).*/\1/p' )
@@ -581,7 +582,7 @@ print_manage_block() {
   printf '  %-44s %s\n' "xray-all info" "重新打印凭据与分享链接"
   printf '  %-44s %s\n' "xray-all status" "服务状态与监听端口"
   printf '  %-44s %s\n' "xray-all logs [N]" "最近 N 行日志"
-  printf '  %-44s %s\n' "xray-all update" "升级内核并重启"
+  printf '  %-44s %s\n' "xray-all update" "升级到上游最新内核 (XRAY_TAG=vX.Y.Z 钉版本)"
   printf '  %-44s %s\n' "xray-all uninstall" "卸载 (KEEP_CONFIG=1 保留配置)"
   echo
   printf '  %s· 排错命令%s\n' "$C_BLD" "$C_RST"
@@ -738,8 +739,10 @@ do_install() {
 }
 
 cmd_update() {
-  detect_platform; install_binary; start_service; install_self
-  log "升级完成: $( { "$BIN_PATH" version 2>&1 || true; } | sed -n 1p )"
+  # update 默认拉上游最新版; XRAY_TAG=钉版本 时退化为按版本修复
+  detect_platform; install_binary latest; start_service; install_self
+  local nver; nver=$( { "$BIN_PATH" version 2>&1 || true; } | sed -n '1s/^\(Xray [^ ]*\).*/\1/p' )
+  log "升级完成: ${nver:-未知版本}"
 }
 
 cmd_status() {

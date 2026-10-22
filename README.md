@@ -165,7 +165,7 @@ sudo PROTOCOLS=vless,vmess DOMAIN=foo.example.com bash shoes_all.sh
 shoes-all info            # 重新打印凭据与分享链接
 shoes-all status          # 服务状态与监听端口
 shoes-all logs [N]        # 最近 N 行日志
-shoes-all update          # 按锁定版本校验/重装二进制并重启（配置不变）
+shoes-all update          # 升级到上游最新内核并重启（SHOES_TAG=vX.Y.Z 可钉版本，配置不变）
 shoes-all plan            # 只打印端口计划，不安装
 shoes-all uninstall       # 卸载（KEEP_CONFIG=1 保留配置）
 
@@ -183,31 +183,32 @@ xray-all info/status/logs/update/uninstall   # 同上的 xray 版本
 
 ## 内核版本与升级
 
-三个脚本默认都**锁死一个已验证版本**，重复执行不会联网下载同一个包（已装同版本直接跳过）。想升到上游最新，必须显式带 `XXX_TAG=latest`：
+**安装永远锁定已验证版本**：三脚本各锁一个测试过的版本（见下表），重复 install 已装同版本会直接跳过下载，保证部署结果可复现。
+
+**`update` 默认拉上游最新版**（仅 shoes / xray 有此子命令），想钉版本时显式带 `XXX_TAG=`：
 
 ```bash
-# shoes：升级到上游最新 release
-sudo SHOES_TAG=latest shoes-all update
+# shoes / xray：一条命令升级到上游最新 release（配置与凭据不变，装完自动重启）
+sudo shoes-all update
+sudo xray-all update
 
-# xray：升级到上游最新 release
-sudo XRAY_TAG=latest xray-all update
+# 钉住某个版本（退化为"按版本修复/重装"，不再追新）
+sudo SHOES_TAG=v0.3.3 shoes-all update
+sudo XRAY_TAG=v26.3.27 xray-all update
 
 # sing-box：没有 update 子命令，带 latest 重跑 install（配置/凭据复用）
 sudo SINGBOX_TAG=latest bash singbox_all.sh install
-
-# 也可以直接钉到某个具体版本
-sudo XRAY_TAG=v26.3.27 xray-all update
 sudo SINGBOX_TAG=v1.14.3-extended-2.7.3 bash singbox_all.sh install
 ```
 
-| 脚本       | 锁定默认                     | latest 行为                                    |
-| -------- | ------------------------ | -------------------------------------------- |
-| shoes    | `v0.3.3`                 | 查 GitHub API，失败回退锁定版本并告警                     |
-| sing-box | `v1.14.1-extended-2.7.2` | 查 GitHub API，失败直接报错（可 `SINGBOX_TAG=v...` 指定） |
-| xray     | `v26.3.27`               | 查 GitHub API，失败回退锁定版本并告警                     |
+| 脚本       | 安装锁定默认                     | update 默认      | latest 行为                                    |
+| -------- | ------------------------ | --------------- | -------------------------------------------- |
+| shoes    | `v0.3.3`                 | 上游最新            | 查 GitHub API，失败回退锁定版本并告警                     |
+| sing-box | `v1.14.1-extended-2.7.2` | （无 update 子命令）  | 查 GitHub API，失败直接报错（可 `SINGBOX_TAG=v...` 指定） |
+| xray     | `v26.3.27`               | 上游最新            | 查 GitHub API，失败回退锁定版本并告警                     |
 
 
-> 注意：不带 `XXX_TAG=latest` 时，`update` 只会按锁定版本校验/重装，**不会**被动升到上游最新——这是刻意的，保证每次部署结果可复现。
+> 设计意图：**install 求稳**（新机器装出来的永远是验证过的版本）、**update 求新**（日常一条命令追上游）、**钉版本求可控**（`XXX_TAG=vX.Y.Z` 显式覆盖两者）。显式设置的 `XXX_TAG` 优先级最高，install 和 update 都认。
 
 ---
 
