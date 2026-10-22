@@ -219,7 +219,7 @@ install_binary() {
   local tag; tag=$(resolve_tag)
   [ -n "$tag" ] || tag="$XRAY_TAG_DEFAULT"
   if [ -x "$BIN_PATH" ]; then
-    local cur; cur=$("$BIN_PATH" version 2>/dev/null | sed -n 1p || true)
+    local cur; cur=$( { "$BIN_PATH" version 2>/dev/null || true; } | sed -n '1s/^\(Xray [^ ]*\).*/\1/p' )
     # Xray 的 version 输出不带 v 前缀(Xray 26.3.27 ...), 比较时去掉 tag 的 v
     if echo "$cur" | grep -q "${tag#v}"; then ok "已安装 ${cur:-未知}, 跳过下载"; return; fi
     warn "现有版本: ${cur:-未知}, 准备升级到 ${tag}"
@@ -239,7 +239,8 @@ install_binary() {
     [ -f "$tmp/$f" ] && install -m 644 "$tmp/$f" "$CONF_DIR/$f"
   done
   rm -rf "$tmp"
-  ok "已安装: $("$BIN_PATH" version 2>&1 | head -1)"
+  local nver; nver=$( { "$BIN_PATH" version 2>&1 || true; } | sed -n '1s/^\(Xray [^ ]*\).*/\1/p' )
+  ok "已安装: ${nver:-$tag}"
 }
 
 # ---- Reality 密钥 (依赖 xray 二进制, 需在 install_binary 之后调用) ----
@@ -598,6 +599,10 @@ print_summary() {
   ip=$(detect_public_ip)
   sni="$DOMAIN"
   ver=$( { "$BIN_PATH" version 2>&1 || true; } | sed -n '1p' )
+  # xray version 首行是 "Xray 26.3.27 (Xray, Penetrates Everything.) d2758a0 (go1.26.1 linux/amd64)"
+  # 只保留 "Xray 26.3.27", 避免把构建信息整行塞进表格
+  ver=$(printf '%s\n' "$ver" | sed -n 's/^\(Xray [^ ]*\).*/\1/p')
+  [ -n "$ver" ] || ver="Xray (未知版本)"
 
   echo
   printf '  %s============================================================%s\n' "$C_BLD$C_BLU" "$C_RST"
@@ -760,6 +765,8 @@ cmd_status() {
 
 cmd_info() {
   [ -f "$CREDS_FILE" ] || die "未找到凭据文件 $CREDS_FILE，请先安装"
+  # info 不经过 install 流程, 此处补一次平台探测, 否则"初始化系统"恒为空
+  [ -n "$INIT_SYS" ] || detect_platform
   . "$CREDS_FILE"
   CERT_FILE="${CERT_FILE:-$CERT_FILE_DEFAULT}"
   print_summary
@@ -767,6 +774,8 @@ cmd_info() {
 
 cmd_logs() {
   local n="${1:-100}"
+  # 直接调用 logs 时不经过 install 流程, 需自行探测, 否则 INIT_SYS 为空会误走文件日志分支
+  [ -n "$INIT_SYS" ] || detect_platform
   if [ "$INIT_SYS" = "systemd" ]; then journalctl -u "$SERVICE_NAME" -n "$n" --no-pager
   else tail -n "$n" /var/log/"${SERVICE_NAME}".log 2>/dev/null || die "无日志文件"; fi
 }
@@ -790,7 +799,34 @@ cmd_uninstall() {
   else
     rm -rf "$CONF_DIR"; ok "已删除 $CONF_DIR (KEEP_CONFIG=1 可保留)"
   fi
-  rm -f /usr/local/bin/xray-all "$BIN_PATH"
+  rm -f /usr/local/bin/xray-all
+  # /usr/local/bin/xray 是通用路径, 可能有其他服务共用, 不能无脑删
+  local others
+  others=$(grep -ls "$BIN_PATH" /etc/systemd/system/*.service /etc/init.d/* 2>/dev/null \
+             | grep -v "${SERVICE_NAME}" | head -3 | tr '\n' ' ' || true)
+  if [ -z "$others" ]; then
+    rm -f "$BIN_PATH"; ok "已删除二进制"
+  else
+    warn "其他服务仍引用 ${BIN_PATH}, 保留二进制: ${others}"
+  fi
+
+  # 防火墙规则不自动删除(可能混有用户自建规则), 只给出清理命令
+  local fports="" fp
+  enabled ss && fports="$fports ${SS_PORT} ${SS_PORT}/udp" || true
+  enabled vless && fports="$fports ${VLESS_PORT}" || true
+  enabled vmess && fports="$fports ${VMESS_PORT}" || true
+  enabled trojan && fports="$fports ${TROJAN_PORT}" || true
+  enabled reality && fports="$fports ${REALITY_PORT}" || true
+  if [ -n "$fports" ]; then
+    if have ufw && ufw status 2>/dev/null | grep -q "Status: active"; then
+      warn "防火墙规则未自动删除(避免误删你自建的规则), 需要时手动执行:"
+      for fp in $fports; do printf '    ufw delete allow %s\n' "$fp"; done
+    elif have firewall-cmd && firewall-cmd --state >/dev/null 2>&1; then
+      warn "防火墙规则未自动删除(避免误删你自建的规则), 需要时手动执行:"
+      for fp in $fports; do printf '    firewall-cmd --permanent --remove-port=%s\n' "$fp"; done
+      printf '    firewall-cmd --reload\n'
+    fi
+  fi
   ok "卸载完成"
 }
 

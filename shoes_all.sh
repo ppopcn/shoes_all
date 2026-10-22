@@ -739,6 +739,8 @@ cmd_status() {
 
 cmd_info() {
   [ -f "$CREDS_FILE" ] || die "未找到凭据文件 $CREDS_FILE，请先安装"
+  # info 不经过 install 流程, 此处补一次平台探测, 否则"初始化系统"恒为空
+  [ -n "$INIT_SYS" ] || detect_platform
   . "$CREDS_FILE"
   CERT_FILE="${CERT_FILE:-$CERT_FILE_DEFAULT}"
   print_summary
@@ -746,6 +748,8 @@ cmd_info() {
 
 cmd_logs() {
   local n="${1:-100}"
+  # 直接调用 logs 时不经过 install 流程, 需自行探测, 否则 INIT_SYS 为空会误走文件日志分支
+  [ -n "$INIT_SYS" ] || detect_platform
   if [ "$INIT_SYS" = "systemd" ]; then journalctl -u "$SERVICE_NAME" -n "$n" --no-pager
   else tail -n "$n" /var/log/"${SERVICE_NAME}".log 2>/dev/null || die "无日志文件"; fi
 }
@@ -770,6 +774,25 @@ cmd_uninstall() {
     rm -rf "$CONF_DIR"; ok "已删除 $CONF_DIR (KEEP_CONFIG=1 可保留)"
   fi
   rm -f /usr/local/bin/shoes-all "$BIN_PATH"
+  # 防火墙规则不自动删除(可能混有用户自建规则), 只给出清理命令
+  local fports="" fp
+  enabled hy2 && fports="$fports ${HY2_PORT}/udp" || true
+  enabled tuic && fports="$fports ${TUIC_PORT}/udp" || true
+  enabled ss && fports="$fports ${SS_PORT}" || true
+  enabled vless && fports="$fports ${VLESS_PORT}" || true
+  enabled vmess && fports="$fports ${VMESS_PORT}" || true
+  enabled trojan && fports="$fports ${TROJAN_PORT}" || true
+  enabled reality && fports="$fports ${REALITY_PORT}" || true
+  if [ -n "$fports" ]; then
+    if have ufw && ufw status 2>/dev/null | grep -q "Status: active"; then
+      warn "防火墙规则未自动删除(避免误删你自建的规则), 需要时手动执行:"
+      for fp in $fports; do printf '    ufw delete allow %s\n' "$fp"; done
+    elif have firewall-cmd && firewall-cmd --state >/dev/null 2>&1; then
+      warn "防火墙规则未自动删除(避免误删你自建的规则), 需要时手动执行:"
+      for fp in $fports; do printf '    firewall-cmd --permanent --remove-port=%s\n' "$fp"; done
+      printf '    firewall-cmd --reload\n'
+    fi
+  fi
   ok "卸载完成"
 }
 

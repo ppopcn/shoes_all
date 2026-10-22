@@ -1295,6 +1295,26 @@ cmd_uninstall() {
   else
     warn "检测到其他 sing-box 服务仍在, 保留 ${BIN_PATH}: $(echo $others)"
   fi
+  # 防火墙规则不自动删除(可能混有用户自建规则), 只给出清理命令
+  local fports="" fp
+  want_proto mt && fports="$fports ${MT_PORT}/tcp" || true
+  want_proto hy2 && fports="$fports ${HY2_PORT}/udp" || true
+  want_proto tuic && fports="$fports ${TUIC_PORT}/udp" || true
+  want_proto ssr && fports="$fports ${SSR_PORT}/tcp ${SSR_PORT}/udp" || true
+  want_proto vless && fports="$fports ${VLESS_PORT}/tcp" || true
+  want_proto vmess && fports="$fports ${VMESS_PORT}/tcp" || true
+  want_proto trojan && fports="$fports ${TROJAN_PORT}/tcp" || true
+  want_proto reality && fports="$fports ${REALITY_PORT}/tcp" || true
+  if [[ -n "$fports" ]]; then
+    if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
+      warn "防火墙规则未自动删除(避免误删你自建的规则), 需要时手动执行:"
+      for fp in $fports; do printf '    ufw delete allow %s\n' "$fp"; done
+    elif command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
+      warn "防火墙规则未自动删除(避免误删你自建的规则), 需要时手动执行:"
+      for fp in $fports; do printf '    firewall-cmd --permanent --remove-port=%s\n' "$fp"; done
+      printf '    firewall-cmd --reload\n'
+    fi
+  fi
   echo
   ok "卸载完成。若不再需要, 可手动清理 ${CONFIG_DIR}"
 }
@@ -2305,6 +2325,8 @@ cmd_status() {
 
 cmd_info() {
   [[ -f "$CONFIG_FILE" ]] || die "未找到配置 ${CONFIG_FILE}, 请先运行部署"
+  # info 不经过 install 流程, 此处补一次平台探测, 否则"初始化系统"恒为空
+  [[ -n "${INIT_SYSTEM:-}" ]] || detect_platform
   load_all_credentials
   print_summary_all "$(public_addr)"
 }

@@ -137,13 +137,13 @@ sudo PROTOCOLS=vless,vmess DOMAIN=foo.example.com bash shoes_all.sh
 | ----------- | -------- | --------- | ------------------------ |
 | Hysteria2   | 443/udp  | QUIC      | 抗封锁首选                    |
 | TUIC v5     | 8443/udp | QUIC      | 需 `alpn=h3`              |
-| Shadowsocks | 8388/tcp | TCP       | aes-256-gcm              |
+| Shadowsocks | 8388/tcp | TCP       | aes-256-gcm；**仅 TCP，内核不支持 UDP 转发** |
 | VLESS       | 8989/tcp | TCP + TLS | 自签证书                     |
 | VMess       | 8990/tcp | TCP + TLS | 加密方式须 `aes-128-gcm`      |
 | Trojan      | 8444/tcp | TCP + TLS |                          |
 | Reality     | 8899/tcp | TCP       | VLESS + XTLS Vision，无需证书 |
 
-**singbox_all.sh**：另有 MTPROXY 443/tcp（与 HY2 的 443/udp 共存），VLESS/VMess 走 TLS + WS，端口同上表。
+**singbox_all.sh**：另有 MTPROXY 443/tcp（与 HY2 的 443/udp 共存），VLESS/VMess 走 TLS + WS，端口同上表。sing-box 的 Shadowsocks 是 `8388/tcp+udp`，UDP 转发可用。
 
 **xray_all.sh**
 
@@ -242,6 +242,27 @@ sudo SINGBOX_TAG=v1.14.3-extended-2.7.3 bash singbox_all.sh install
 
 ---
 
+## 实测记录
+
+环境：Debian GNU/Linux 12 (bookworm) / x86_64 / OpenSSL 3.0.22。
+
+方法：服务端装全家桶后，客户端在**同一台机器的 127.0.0.1** 上回环直连各入站（xray 26.3.27 充当 TCP 系客户端、sing-box 充当 QUIC 系客户端），逐协议独立建连并请求 `https://www.gstatic.com/generate_204`，返回 204 才记为通过。
+
+| 脚本                | 通过 / 总数 | 明细                                                       |
+| ----------------- | ------- | -------------------------------------------------------- |
+| `shoes_all.sh`    | 5 / 5   | ss、vless、vmess、trojan、reality 全通（hy2/tuic 仅确认 UDP 监听就绪，未做 QUIC 客户端验证） |
+| `singbox_all.sh`  | 7 / 7   | ss、vless、vmess、trojan、reality、hy2、tuic 全通                 |
+| `xray_all.sh`     | 5 / 5   | ss、vless(WS)、vmess(WS)、trojan、reality 全通                  |
+
+补充验证：
+
+- **Shadowsocks UDP 中转**：xray 版实测通过（`dokodemo-door` → SS UDP → `8.8.8.8:53` 解析成功）；shoes 版内核不支持，sing-box 版监听 `8388/udp`。
+- **二次 install**：三个脚本都会打印「已安装 x.y.z, 跳过下载」，不重复拉二进制。
+- **卸载**：服务单元、配置目录、二进制均清除；用户用 `CERT_FILE` 指定的证书会被保留；防火墙规则保留但给出清理命令。
+- **未覆盖**：MTPROXY 的端到端登录需要真实 Telegram 账号，本轮只验证了入站工作正常（连接被接住并走伪装逻辑）与配置合法性；hy2/tuic 的 QUIC 回环在 sing-box 版做过，shoes 版因缺客户端未做。
+
+---
+
 ## 踩过的坑（客户端连不上先看这里）
 
 | 现象                                                                                          | 原因                                                                                                                       | 处理                                                             |
@@ -254,6 +275,10 @@ sudo SINGBOX_TAG=v1.14.3-extended-2.7.3 bash singbox_all.sh install
 | 拉到的脚本是旧版                                                                                    | raw 的 Fastly 缓存 300 秒                                                                                                    | 等 5 分钟，或按 commit sha 拉                                         |
 | xray Reality 握手失败，日志 `REALITY: processed invalid connection ... handshake did not complete` | `REALITY_DEST` 用了 [www.microsoft.com，其证书记录](http://www.microsoft.com，其证书记录) 8273 字节超过 REALITY 解析器 8192 硬编码上限（XTLS #6356） | 换 dest，如 `www.cloudflare.com:443`（xray 脚本已默认），服务端和客户端 SNI 要同步改 |
 | Xray 26.x 客户端报 `The feature "allowInsecure" has been removed`                               | 新版 Xray 客户端移除了 allowInsecure，迁到 `pinnedPeerCertSha256`（hex 编码的证书 DER sha256）                                             | 客户端改用 pin，或用支持 insecure 的客户端内核；有域名建议挂真证书一劳永逸                   |
+| xray 版 VLESS/VMess 连上但没流量，服务端日志 `http2: server: error reading preface ... bogus greeting` | 这两个入站是 **WS 传输**，客户端漏配 `path` / `Host` 时，TLS 层通了但 HTTP Upgrade 不成立                                                              | 客户端补上 `path=/vless`（或 `/vmess`）与 `Host`=SNI；这一点和 shoes 版的裸 TCP 不同 |
+| sing-box 的 443 端口「连上了但没数据」                                                              | MTPROXY 用 `domain_fronting_port=443` + secret 尾部域名做伪装，非 MTPROXY 流量会被转发到 `www.cloudflare.com:443`（返回 TLS Alert）。这是设计行为，不是串线 | 检查 secret 是否用完整 `ee...` 串、客户端是否开了 MTPROXY 类型；抓包会看到目标域名是 cloudflare |
+| shoes 的 Shadowsocks 没有 UDP 中转                                                              | shoes 内核的 shadowsocks 入站只支持 `type/cipher/password`，无 UDP 配置项（见上游 CONFIG.md）                                              | 需要 SS UDP（游戏、DNS）就用 sing-box 或 xray 版；shoes 版只能代理 TCP            |
+| 卸载后 `ufw status` 里端口还在放行                                                                | 卸载**不会自动删防火墙规则**（避免误删你自建的规则），只打印可复制的删除命令                                                                                     | 按卸载输出的 `ufw delete allow <port>` 逐条清；换内核前先清一次能避免规则越积越多      |
 
 ---
 
